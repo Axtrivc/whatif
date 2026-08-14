@@ -44,8 +44,8 @@ function curlJson(url) {
   }
 }
 
-async function fetchKlines(secid, { retries = 3, backoffMs = 45_000 } = {}) {
-  const url = `${API}?secid=${encodeURIComponent(secid)}&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=2&beg=19700101&end=20991231`;
+async function fetchKlines(secid, { fqt = 2, retries = 3, backoffMs = 45_000 } = {}) {
+  const url = `${API}?secid=${encodeURIComponent(secid)}&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=${fqt}&beg=19700101&end=20991231`;
   for (let i = 0; i <= retries; i++) {
     const j = curlJson(url);
     const k = j?.data?.klines;
@@ -100,6 +100,17 @@ for (const [key, secids, minPoints] of targets) {
       // 后复权比值 = 红利复投总回报; 抓取日
       fetchedAt: new Date().toISOString().slice(0, 10),
     };
+    // 补抓 fqt=0 不复权真实价(展示"买入价/现价"), 按日期对齐合并
+    const raw = await fetchKlines(secid, { fqt: 0 });
+    await sleep(GAP_MS);
+    if (raw) {
+      const map = new Map();
+      for (const row of raw.klines) {
+        const [d, c] = row.split(',');
+        map.set(d.replace(/-/g, ''), Number(c));
+      }
+      payload.rawCloses = dates.map((d) => map.get(d) ?? null);
+    }
     await writeFile(path.join(outDir, `${key}.json`), JSON.stringify(payload));
     manifest[key] = { first: payload.first, last: payload.last, points: payload.points };
     console.log(`  ✔ ${data.name} ${dates[0]} → ${dates[dates.length - 1]}  ${dates.length} 点`);

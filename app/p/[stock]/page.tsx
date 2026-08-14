@@ -42,7 +42,7 @@ export default async function StockLanding({ params }: Props) {
   for (let y = lastYear - 2; y <= lastYear; y++) if (y > firstYear) anchors.add(y);
   const years = [...anchors].sort((a, b) => b - a);
 
-  // 每个锚点年份投入 $10万 的真实结果
+  // 每个锚点年份投入 10万 的真实结果
   const rows = years.map((y) => {
     const start = series.dates.findIndex((d) => d.slice(0, 4) === String(y));
     if (start < 0) return null;
@@ -86,7 +86,7 @@ export default async function StockLanding({ params }: Props) {
 
       {hl && (
         <p className="mt-4 font-mono text-lg text-up">
-          $10万 → {money(hl.stats.finalValue, 'zh')}（{multiple(hl.stats.multiple)} ·{' '}
+          10万 → {money(hl.stats.finalValue, 'zh')}（{multiple(hl.stats.multiple)} ·{' '}
           {pct(hl.stats.returnPct, 0)}）
         </p>
       )}
@@ -122,7 +122,7 @@ export default async function StockLanding({ params }: Props) {
           <thead>
             <tr className="bg-white/5 text-left text-xs uppercase tracking-wider text-white/40">
               <th className="px-4 py-3 font-semibold">买入年份</th>
-              <th className="px-4 py-3 text-right font-semibold">$10万 →</th>
+              <th className="px-4 py-3 text-right font-semibold">10万 →</th>
               <th className="px-4 py-3 text-right font-semibold">倍数</th>
               <th className="hidden px-4 py-3 text-right font-semibold sm:table-cell">年化</th>
             </tr>

@@ -1,343 +1,255 @@
 /**
- * 回放渲染器 — 纯函数 drawFrame
+ * 回放图表渲染器 — 纯函数 drawFrame(电影感滑动镜头版)
  *
- * 一切(HUD/图表/水印)都画进 canvas:
- * 1. 实时预览与未来 v1.5 的逐帧视频导出共用同一渲染路径, 像素级一致
- * 2. 无 DOM 依赖, 可在 Worker/OffscreenCanvas 中运行
+ * canvas 只负责图表本体:
+ *   左侧 Y 轴自适应刻度(弹性平滑) / 底部 X 轴滚动刻度 / 本金虚线 /
+ *   滑动窗口折线(固定 6-12 个月跨度, 旧数据向左滚出) /
+ *   前沿呼吸光标(Pulsing Dot) + 跟随资产气泡 + 垂直参考虚线 /
+ *   盈亏状态色(红↔青绿)无缝渐变 / 右下水印(安全区间距)
+ *
+ * 标题/战报/终局卡等 chrome 全部由 DOM 承担(见 ReplayExperience)。
+ *
+ * 跨帧平滑状态(lo/hi/f)由调用方持有并经 smooth 传入 —— 渲染本身仍无副作用。
  */
 import { indexAtT, type ReplayInput } from '@/lib/engine';
-import { dateISO, money, pct, profitExact } from '@/lib/format';
+import { dateYM, moneyZh } from '@/lib/format';
 
-export interface RenderLabels {
-  ifBought: string; // 假如
-  bought: string; // 买入
-  mode: string; // 一直持有 · 红利复投
-  peak: string; // 峰值
-  principal: string; // 本金
-  disclaimer: string; // 模拟估算 仅供参考
+export interface SmoothState {
+  lo?: number; // 平滑后的 y 域下限(资产值)
+  hi?: number; // 平滑后的 y 域上限
+  f?: number; // 盈亏状态色因子 0=青绿 1=红
 }
 
-export const LABELS: Record<'zh' | 'en', RenderLabels> = {
-  zh: {
-    ifBought: '假如',
-    bought: '买入',
-    mode: '一直持有 · 红利复投',
-    peak: '峰值',
-    principal: '本金',
-    disclaimer: '历史模拟 · 仅供参考 · 不构成投资建议',
-  },
-  en: {
-    ifBought: 'What if you bought',
-    bought: 'in',
-    mode: 'Buy & Hold · Dividends Reinvested',
-    peak: 'Peak',
-    principal: 'Invested',
-    disclaimer: 'Simulation for reference only. Not investment advice.',
-  },
-};
-
-export interface AssetMeta {
-  zh: string;
-  en: string;
-  symbol: string;
-}
-
-export interface FrameOpts {
-  w: number; // CSS 像素
+export interface ChartOpts {
+  w: number;
   h: number;
   dpr: number;
-  t: number; // 0..1
+  t: number; // 0..1 播放进度
+  ts: number; // performance.now(), 驱动呼吸脉冲
   input: ReplayInput;
-  asset: AssetMeta;
-  locale: 'zh' | 'en';
-  site?: string;
+  smooth: SmoothState;
+  watermark?: string;
 }
 
-const SANS = '"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
 const MONO = 'ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace';
-const UP = '#ff4d4f';
-const DOWN = '#20c997';
-const INK = '#f5f5f7';
-const DIM = 'rgba(245,245,247,0.45)';
-const LINE = '#ff3b30';
+const SANS = '"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+const RED: [number, number, number] = [255, 77, 79]; // #FF4D4F 盈
+const CYAN: [number, number, number] = [0, 245, 212]; // #00F5D4 亏
 
-export function renderFrame(ctx: CanvasRenderingContext2D, o: FrameOpts): void {
-  const { w, h, dpr, t, input, asset, locale } = o;
-  const L = LABELS[locale];
+/** 窗口跨度(交易日): ~8 个月, 让月度涨跌清晰可见 */
+const SPAN_DAYS = 160;
+
+function mixColor(f: number, alpha = 1): string {
+  const r = Math.round(CYAN[0] + (RED[0] - CYAN[0]) * f);
+  const g = Math.round(CYAN[1] + (RED[1] - CYAN[1]) * f);
+  const b = Math.round(CYAN[2] + (RED[2] - CYAN[2]) * f);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
+  const { w, h, dpr, t, ts, input, smooth } = o;
   ctx.save();
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
 
-  // 背景: 近黑 + 轻微暗角
-  const bg = ctx.createLinearGradient(0, 0, 0, h);
-  bg.addColorStop(0, '#0a0a12');
-  bg.addColorStop(1, '#060609');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, w, h);
-  const vig = ctx.createRadialGradient(w / 2, h * 0.4, w * 0.2, w / 2, h * 0.5, h * 0.75);
-  vig.addColorStop(0, 'rgba(255,59,48,0.05)');
-  vig.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = vig;
-  ctx.fillRect(0, 0, w, h);
-
-  const LS = w > h; // 横屏舞台: HUD 紧凑两行, 图表占主体
-  const pad = LS ? Math.round(h * 0.055) : Math.round(w * 0.065);
-  const name = locale === 'zh' ? asset.zh : asset.en;
-  const year = input.dates[input.start].slice(0, 4);
-
   const idx = indexAtT(input, t);
   const base = input.closes[input.start];
-  const value = (input.amount * input.closes[idx]) / base;
-  const gain = value - input.amount;
-  const up = gain >= 0;
+  const amount = input.amount;
+  const val = (i: number) => (amount * input.closes[i]) / base;
+  const value = val(idx);
 
-  ctx.textBaseline = 'top';
-
-  if (LS) {
-    // ---- 横屏 HUD: 第一行 标题+日期, 第二行 巨额+涨幅+收益 ----
-    ctx.textAlign = 'left';
-    ctx.font = `600 ${Math.round(h * 0.055)}px ${SANS}`;
-    ctx.fillStyle = DIM;
-    ctx.fillText(
-      locale === 'zh' ? `${L.ifBought} ${year} 年买入 ${name} ${asset.symbol}` : `${L.ifBought} ${name} ${L.bought} ${year} · ${asset.symbol}`,
-      pad,
-      pad
-    );
-    ctx.textAlign = 'right';
-    ctx.font = `500 ${Math.round(h * 0.06)}px ${MONO}`;
-    ctx.fillStyle = 'rgba(245,245,247,0.75)';
-    ctx.fillText(dateISO(input.dates[idx]), w - pad, pad);
-
-    ctx.textAlign = 'left';
-    const vy = pad + h * 0.085;
-    ctx.font = `800 ${Math.round(Math.min(h * 0.155, w * 0.05))}px ${MONO}`;
-    ctx.fillStyle = INK;
-    ctx.shadowColor = 'rgba(255,59,48,0.35)';
-    ctx.shadowBlur = up ? 16 : 0;
-    ctx.fillText(money(value, locale), pad, vy);
-    ctx.shadowBlur = 0;
-    const vw = ctx.measureText(money(value, locale)).width;
-    ctx.font = `700 ${Math.round(h * 0.07)}px ${MONO}`;
-    ctx.fillStyle = up ? UP : DOWN;
-    ctx.fillText(pct(gain / input.amount), pad + vw + h * 0.06, vy + h * 0.045);
-    const pw = ctx.measureText(pct(gain / input.amount)).width;
-    ctx.font = `500 ${Math.round(h * 0.05)}px ${MONO}`;
-    ctx.fillStyle = up ? 'rgba(255,77,79,0.75)' : 'rgba(32,201,151,0.75)';
-    ctx.fillText(profitExact(gain), pad + vw + h * 0.06 + pw + h * 0.045, vy + h * 0.06);
-  } else {
-    // ---- 竖屏 HUD: 自上而下堆叠 ----
-    let y = pad + 6;
-    ctx.textAlign = 'left';
-    ctx.font = `600 ${Math.round(w * 0.042)}px ${SANS}`;
-    ctx.fillStyle = DIM;
-    if (locale === 'zh') {
-      ctx.fillText(`${L.ifBought} ${year} 年买入`, pad, y);
-    } else {
-      ctx.fillText(`${L.ifBought} ${name} ${L.bought} ${year}`, pad, y);
-    }
-    y += w * 0.062;
-
-    ctx.font = `800 ${Math.round(w * 0.072)}px ${SANS}`;
-    ctx.fillStyle = INK;
-    ctx.fillText(`${name} ${asset.symbol}`, pad, y);
-    y += w * 0.105;
-
-    // 当前日期(跳动)
-    ctx.font = `500 ${Math.round(w * 0.05)}px ${MONO}`;
-    ctx.fillStyle = 'rgba(245,245,247,0.75)';
-    ctx.fillText(dateISO(input.dates[idx]), pad, y);
-    y += w * 0.085;
-
-    // 当前市值(巨大)
-    ctx.font = `800 ${Math.round(w * 0.115)}px ${MONO}`;
-    ctx.fillStyle = INK;
-    ctx.shadowColor = 'rgba(255,59,48,0.35)';
-    ctx.shadowBlur = up ? 18 : 0;
-    ctx.fillText(money(value, locale), pad, y);
-    ctx.shadowBlur = 0;
-    y += w * 0.15;
-
-    // 涨幅 + 精确收益
-    ctx.font = `700 ${Math.round(w * 0.06)}px ${MONO}`;
-    ctx.fillStyle = up ? UP : DOWN;
-    ctx.fillText(pct(gain / input.amount), pad, y);
-    const pw = ctx.measureText(pct(gain / input.amount)).width;
-    ctx.font = `500 ${Math.round(w * 0.045)}px ${MONO}`;
-    ctx.fillStyle = up ? 'rgba(255,77,79,0.75)' : 'rgba(32,201,151,0.75)';
-    ctx.fillText(profitExact(gain), pad + pw + w * 0.035, y + w * 0.012);
-  }
-
-  // ---------- 图表区(滑动窗口看细节, 结尾拉远看全局) ----------
-  const chartTop = LS ? Math.round(h * 0.3) : Math.round(h * 0.42);
-  const chartBottom = LS ? Math.round(h * 0.88) : Math.round(h * 0.9);
-  const chartW = w - pad * 2;
-  const chartH = chartBottom - chartTop;
-
+  // ── 滑动镜头窗口: 头部钉在右缘, 旧数据向左滚出 ──
   const n = input.end - input.start;
-  // 窗口跨度(交易日): 覆盖约1-2.5年, 让月度涨跌清晰可见
-  const W = Math.round(Math.min(Math.max(n * 0.15, 240), 620));
-  const ZOOM_OUT_T = 0.82; // 最后 18% 时间用于拉远到全局总览
-  const easeInOut = (x: number) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+  const span = Math.min(SPAN_DAYS, n + 1);
+  const wEnd = Math.max(idx + 1, Math.min(input.start + span, input.end + 1));
+  const wStart = Math.max(input.start, wEnd - span);
 
-  // 可见窗口: 播放期 [idx-W, idx] 前移; 收尾期平滑扩张到 [start, end]
-  let wEnd = Math.max(idx, Math.min(input.start + W, input.end));
-  let wStart = Math.max(input.start, wEnd - W);
-  if (t > ZOOM_OUT_T) {
-    const s = easeInOut((t - ZOOM_OUT_T) / (1 - ZOOM_OUT_T));
-    wEnd = Math.round(wEnd + (input.end - wEnd) * s);
-    wStart = Math.round(wStart + (input.start - wStart) * s);
+  // ── y 域目标(窗口内已走过部分) → 弹性平滑 ──
+  let vLo = Infinity;
+  let vHi = -Infinity;
+  for (let i = wStart; i <= idx; i++) {
+    const v = val(i);
+    if (v < vLo) vLo = v;
+    if (v > vHi) vHi = v;
   }
-  if (wEnd - wStart < 2) wEnd = Math.min(input.end, wStart + 2);
-
-  // y 域: 窗口内已走过部分的价格范围
-  let vMin = Infinity;
-  let vMax = -Infinity;
-  for (let i = wStart; i <= Math.min(idx, wEnd); i++) {
-    const v = (input.amount * input.closes[i]) / base;
-    if (v < vMin) vMin = v;
-    if (v > vMax) vMax = v;
+  const padY = Math.max((vHi - vLo) * 0.12, vHi * 0.05);
+  const tLo = vLo - padY;
+  const tHi = vHi + padY;
+  if (smooth.lo == null || smooth.hi == null) {
+    smooth.lo = tLo;
+    smooth.hi = tHi;
+  } else {
+    smooth.lo += (tLo - smooth.lo) * 0.12;
+    smooth.hi += (tHi - smooth.hi) * 0.12;
   }
-  vMin = Math.min(vMin, input.amount);
-  vMax = Math.max(vMax, input.amount);
-  const span = Math.max(vMax - vMin, vMax * 0.04);
-  const yTop = vMin - span * 0.06;
-  const yMax = vMax + span * 0.1;
-  const xOf = (i: number) => pad + ((i - wStart) / (wEnd - wStart)) * chartW;
-  const yOf = (v: number) => chartBottom - ((v - yTop) / (yMax - yTop)) * chartH;
+  const lo = smooth.lo;
+  const hi = Math.max(smooth.hi, smooth.lo + 1e-9);
 
-  // 水平网格 + 刻度值
-  ctx.textAlign = 'right';
-  ctx.font = `400 ${Math.round(w * 0.032)}px ${MONO}`;
-  for (let g = 1; g <= 3; g++) {
-    const gv = yTop + ((yMax - yTop) * g) / 4;
+  // ── 盈亏状态色: 红↔青绿 无缝过渡 ──
+  const targetF = value >= amount ? 1 : 0;
+  smooth.f = smooth.f == null ? targetF : smooth.f + (targetF - smooth.f) * 0.07;
+  const f = smooth.f;
+  const lineColor = mixColor(f);
+  const glowColor = mixColor(f, 0.55);
+
+  // ── 布局: 左刻度槽 + 绘图区 + 底部刻度带 ──
+  const gutter = Math.round(Math.min(Math.max(w * 0.075, 46), 64));
+  const plotL = gutter;
+  const plotR = w - 10;
+  const plotT = 12;
+  const plotB = h - 30;
+  const plotW = plotR - plotL;
+  const plotH = plotB - plotT;
+  const xOf = (i: number) => plotL + ((i - wStart) / (span - 1)) * plotW;
+  const yOf = (v: number) => plotB - ((v - lo) / (hi - lo)) * plotH;
+
+  // ── Y 轴刻度(左侧, 左对齐) + 横向网格 ──
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.font = `500 11px ${MONO}`;
+  for (let g = 0; g <= 3; g++) {
+    const gv = lo + ((hi - lo) * g) / 3;
     const gy = yOf(gv);
     ctx.strokeStyle = 'rgba(245,245,247,0.06)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(pad, gy);
-    ctx.lineTo(w - pad, gy);
+    ctx.moveTo(plotL, gy);
+    ctx.lineTo(plotR, gy);
     ctx.stroke();
-    ctx.fillStyle = 'rgba(245,245,247,0.28)';
-    ctx.fillText(money(gv, locale), w - pad - 4, gy - w * 0.045);
+    ctx.fillStyle = 'rgba(245,245,247,0.35)';
+    ctx.fillText(moneyZh(gv), 8, gy);
   }
 
-  // 本金基准虚线(在可视范围内才画)
-  const py = yOf(input.amount);
-  if (py > chartTop + 8 && py < chartBottom - 8) {
-    ctx.setLineDash([5, 5]);
-    ctx.strokeStyle = 'rgba(245,245,247,0.28)';
+  // ── X 轴滚动刻度(跟随窗口平移) ──
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = `400 11px ${MONO}`;
+  for (let g = 0; g <= 3; g++) {
+    const i = wStart + Math.round(((span - 1) * g) / 3);
+    const label = dateYM(input.dates[Math.min(i, input.end)]);
+    ctx.fillStyle = 'rgba(245,245,247,0.3)';
+    ctx.fillText(label, xOf(i), h - 10);
+  }
+
+  // ── 本金虚线(在可视域内才画) ──
+  const py = yOf(amount);
+  if (py > plotT + 6 && py < plotB - 6) {
+    ctx.setLineDash([4, 5]);
+    ctx.strokeStyle = 'rgba(245,245,247,0.22)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(pad, py);
-    ctx.lineTo(w - pad, py);
+    ctx.moveTo(plotL, py);
+    ctx.lineTo(plotR, py);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.textAlign = 'left';
-    ctx.fillStyle = 'rgba(245,245,247,0.4)';
-    ctx.font = `500 ${Math.round(w * 0.03)}px ${SANS}`;
-    ctx.fillText(`${L.principal} ${money(input.amount, locale)}`, pad + 2, py - w * 0.048);
+    ctx.textAlign = 'right';
+    ctx.font = `500 10px ${SANS}`;
+    ctx.fillStyle = 'rgba(245,245,247,0.35)';
+    ctx.fillText('本金', plotR - 2, py - 7);
   }
 
-  // 可见折线 + 面积(从 wStart 到当前; 超长时抽稀采样, 像素级无差)
-  const upNow = input.closes[idx] >= base;
-  const lineColor = upNow ? LINE : DOWN;
-  const segLen = idx - wStart;
-  const step = Math.max(1, Math.floor(segLen / 1500));
-  const drawLinePath = () => {
+  // ── 折线 + 渐变面积(裁剪进绘图区) ──
+  const drawPath = () => {
     ctx.beginPath();
-    ctx.moveTo(xOf(wStart), yOf((input.amount * input.closes[wStart]) / base));
-    for (let i = wStart + 1; i < idx; i += step) {
-      ctx.lineTo(xOf(i), yOf((input.amount * input.closes[i]) / base));
-    }
-    ctx.lineTo(xOf(idx), yOf(value));
+    ctx.moveTo(xOf(wStart), yOf(val(wStart)));
+    for (let i = wStart + 1; i <= idx; i++) ctx.lineTo(xOf(i), yOf(val(i)));
   };
-  const area = ctx.createLinearGradient(0, chartTop, 0, chartBottom);
-  area.addColorStop(0, upNow ? 'rgba(255,59,48,0.30)' : 'rgba(32,201,151,0.26)');
-  area.addColorStop(1, 'rgba(0,0,0,0)');
-  drawLinePath();
   ctx.save();
-  ctx.lineTo(xOf(idx), chartBottom);
-  ctx.lineTo(xOf(wStart), chartBottom);
+  ctx.beginPath();
+  ctx.rect(plotL, plotT - 4, plotW, plotH + 8);
+  ctx.clip();
+  const area = ctx.createLinearGradient(0, plotT, 0, plotB);
+  area.addColorStop(0, mixColor(f, 0.26));
+  area.addColorStop(1, 'rgba(0,0,0,0)');
+  drawPath();
+  ctx.lineTo(xOf(idx), plotB);
+  ctx.lineTo(xOf(wStart), plotB);
   ctx.closePath();
   ctx.fillStyle = area;
   ctx.fill();
-  ctx.restore();
-  drawLinePath();
+  drawPath();
   ctx.strokeStyle = lineColor;
-  ctx.lineWidth = Math.max(2, w * 0.008);
+  ctx.lineWidth = 2.5;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  ctx.shadowColor = upNow ? 'rgba(255,59,48,0.55)' : 'rgba(32,201,151,0.45)';
-  ctx.shadowBlur = 12;
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur = 14;
   ctx.stroke();
   ctx.shadowBlur = 0;
+  ctx.restore();
 
-  // 线端点(当前) + 当前值小标签
+  // 前沿坐标
   const cx = xOf(idx);
   const cy = yOf(value);
-  ctx.fillStyle = lineColor;
+
+  // ── 垂直参考虚线(贯穿到底) ──
+  ctx.setLineDash([3, 4]);
+  ctx.strokeStyle = mixColor(f, 0.45);
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.arc(cx, cy, w * 0.012, 0, Math.PI * 2);
+  ctx.moveTo(cx, cy + 6);
+  ctx.lineTo(cx, plotB);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // ── 呼吸光标: 实心点 + 白描边 + 扩散脉冲环 ──
+  const pulse = (ts / 1100) % 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 6 + 9 * pulse, 0, Math.PI * 2);
+  ctx.strokeStyle = mixColor(f, 0.55 * (1 - pulse));
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+  ctx.fillStyle = lineColor;
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur = 12;
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  // 窗口内峰值标记
-  let pkVal = -Infinity;
-  let pkIdx = wStart;
-  for (let i = wStart; i <= idx; i++) {
-    if (input.closes[i] > pkVal) {
-      pkVal = input.closes[i];
-      pkIdx = i;
-    }
-  }
-  if (pkIdx > wStart + 2 && pkIdx < idx - 2) {
-    const px = xOf(pkIdx);
-    const pyy = yOf((input.amount * pkVal) / base);
-    ctx.fillStyle = 'rgba(245,245,247,0.75)';
-    ctx.font = `500 ${Math.round(w * 0.03)}px ${SANS}`;
-    ctx.textAlign = px > w * 0.6 ? 'right' : 'left';
-    ctx.fillText(
-      `${L.peak} ${money((input.amount * pkVal) / base, locale)}`,
-      px > w * 0.6 ? px - w * 0.02 : px + w * 0.02,
-      pyy - w * 0.045
-    );
-    ctx.fillStyle = 'rgba(245,245,247,0.5)';
-    ctx.beginPath();
-    ctx.arc(px, pyy, w * 0.007, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // 底部日期(窗口两端)
+  // ── 跟随资产气泡 [ 108万 ● ] ──
+  const label = moneyZh(value);
+  ctx.font = `700 13px ${MONO}`;
+  const tw = ctx.measureText(label).width;
+  const bw = tw + 34;
+  const bh = 26;
+  let bx = Math.min(Math.max(cx + 12, plotL), plotR - bw);
+  const by = Math.max(cy - 40, plotT + 2);
+  ctx.beginPath();
+  const rr = (x: number, y: number, w2: number, h2: number, r: number) => {
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+  };
+  rr(bx, by, bw, bh, 8);
+  ctx.fillStyle = 'rgba(8,10,16,0.78)';
+  ctx.fill();
+  ctx.strokeStyle = mixColor(f, 0.85);
+  ctx.lineWidth = 1;
+  ctx.stroke();
   ctx.textAlign = 'left';
-  ctx.fillStyle = 'rgba(245,245,247,0.3)';
-  ctx.font = `400 ${Math.round(w * 0.03)}px ${MONO}`;
-  ctx.fillText(dateISO(input.dates[wStart]), pad, chartBottom + w * 0.02);
-  ctx.textAlign = 'right';
-  ctx.fillText(dateISO(input.dates[Math.min(wEnd, input.end)]), w - pad, chartBottom + w * 0.02);
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(245,245,247,0.95)';
+  ctx.fillText(label, bx + 10, by + bh / 2 + 0.5);
+  ctx.beginPath();
+  ctx.arc(bx + bw - 13, by + bh / 2, 3.5, 0, Math.PI * 2);
+  ctx.fillStyle = lineColor;
+  ctx.fill();
 
-  // ---------- 底部: 模式 + 水印 + 进度 ----------
-  const footY = h - pad - 4;
-  ctx.textAlign = 'left';
-  const fMode = LS ? h * 0.042 : w * 0.032;
-  const fTiny = LS ? h * 0.032 : w * 0.026;
-  ctx.font = `600 ${Math.round(fMode)}px ${SANS}`;
-  ctx.fillStyle = 'rgba(245,245,247,0.55)';
-  ctx.fillText(L.mode, pad, footY - fMode - fTiny * 0.7);
-  ctx.font = `400 ${Math.round(fTiny)}px ${SANS}`;
-  ctx.fillStyle = 'rgba(245,245,247,0.3)';
-  ctx.fillText(L.disclaimer, pad, footY - fTiny * 0.4);
-  if (o.site) {
+  // ── 右下水印(安全区: 距底部刻度带 ≥20px) ──
+  if (o.watermark) {
     ctx.textAlign = 'right';
-    ctx.fillStyle = 'rgba(245,245,247,0.4)';
-    ctx.font = `600 ${Math.round(fMode)}px ${MONO}`;
-    ctx.fillText(o.site, w - pad, footY - fTiny * 0.4);
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = `600 11px ${MONO}`;
+    ctx.fillStyle = 'rgba(245,245,247,0.25)';
+    ctx.fillText(o.watermark, w - 12, h - 46);
   }
-  // 细进度条
-  ctx.fillStyle = 'rgba(245,245,247,0.12)';
-  ctx.fillRect(pad, footY, w - pad * 2, 2);
-  ctx.fillStyle = LINE;
-  ctx.fillRect(pad, footY, (w - pad * 2) * t, 2);
 
   ctx.restore();
 }

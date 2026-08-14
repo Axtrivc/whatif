@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { computeStats, durationFor, type ReplayInput } from '@/lib/engine';
-import { money, multiple, pct } from '@/lib/format';
+import { moneyZh, pct, profitZh, usdPrice } from '@/lib/format';
 import { startIndexForYear, type Series, type StockMeta } from '@/lib/stocks';
-import { renderFrame } from '@/components/replay-render';
+import { renderFrame, type SmoothState } from '@/components/replay-render';
 import { buildShareImage } from '@/components/ShareCard';
 
 interface Props {
@@ -12,37 +13,50 @@ interface Props {
   stock: StockMeta;
   year: number;
   amount: number;
-  locale?: 'zh' | 'en';
+  meme?: string; // 副标题梗(可选), 缺省为模式说明
 }
 
 const SPEEDS = [1, 2, 4] as const;
+const UP = '#FF4D4F';
+const DOWN = '#00F5D4';
 
-export default function ReplayExperience({ series, stock, year, amount, locale = 'zh' }: Props) {
+export default function ReplayExperience({ series, stock, year, amount, meme }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+  const scrubRef = useRef<HTMLInputElement>(null);
+  const pctRef = useRef<HTMLSpanElement>(null);
+  const plRef = useRef<HTMLSpanElement>(null);
+  const dateRef = useRef<HTMLSpanElement>(null);
+  const priceRef = useRef<HTMLSpanElement>(null);
   const rafRef = useRef(0);
   const startTsRef = useRef<number | null>(null);
-  const accRef = useRef(0); // 已播放的秒数(不含暂停)
+  const accRef = useRef(0);
+  const tRef = useRef(0);
+  const smoothRef = useRef<SmoothState>({});
 
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
-  const [t, setT] = useState(0);
   const [done, setDone] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const input = useMemo<ReplayInput>(() => {
     const start = startIndexForYear(series, year);
-    return { dates: series.dates, closes: series.closes, start, end: series.points - 1, amount };
+    return {
+      dates: series.dates,
+      closes: series.closes,
+      start,
+      end: series.points - 1,
+      amount,
+    };
   }, [series, year, amount]);
 
   const duration = useMemo(() => durationFor(input.end - input.start), [input]);
-  const stats = useMemo(
-    () => (done ? computeStats(input) : null),
-    [done, input]
-  );
+  const stats = useMemo(() => (done ? computeStats(input) : null), [done, input]);
+  const amountLabel = moneyZh(amount);
+  const title = `假如你在 ${year}年 买入 ${amountLabel} ${stock.zh}`;
 
-  // 画布尺寸自适应 + 首帧
+  // ── 每帧: 画 canvas + 直写 DOM 指标(ref 直写绕过 React 重渲染, 保 60fps) ──
   const draw = useCallback(
     (tt: number) => {
       const cv = canvasRef.current;
@@ -64,20 +78,42 @@ export default function ReplayExperience({ series, stock, year, amount, locale =
         h,
         dpr,
         t: tt,
+        ts: performance.now(),
         input,
-        asset: { zh: stock.zh, en: stock.en, symbol: stock.symbol },
-        locale,
-        site: 'whatif.axtrivc.com',
+        smooth: smoothRef.current,
+        watermark: 'whatif.axtrivc.com',
       });
+
+      // 右上角战报 + 底部价格直写
+      const i0 = input.start;
+      const i = Math.min(input.end, i0 + Math.floor(tt * (input.end - i0 + 1)));
+      const value = (amount * input.closes[i]) / input.closes[i0];
+      const gain = value - amount;
+      const upNow = gain >= 0;
+      if (pctRef.current) {
+        pctRef.current.textContent = pct(gain / amount);
+        pctRef.current.style.color = upNow ? UP : DOWN;
+      }
+      if (plRef.current) plRef.current.textContent = profitZh(gain);
+      if (plRef.current) plRef.current.style.color = upNow ? UP : DOWN;
+      if (dateRef.current) dateRef.current.textContent = `${series.dates[i].slice(0, 4)}-${series.dates[i].slice(4, 6)}`;
+      if (priceRef.current) {
+        const buy = series.rawCloses?.[i0] ?? null;
+        const cur = series.rawCloses?.[i] ?? null;
+        priceRef.current.textContent = `买入价 ${usdPrice(buy)} · 当前收盘 ${usdPrice(cur)}`;
+      }
+      if (scrubRef.current && document.activeElement !== scrubRef.current) {
+        scrubRef.current.value = String(tt);
+      }
     },
-    [input, stock, locale]
+    [input, series]
   );
 
   useEffect(() => {
-    draw(t);
-  }, [t, draw]);
+    draw(tRef.current);
+  }, [draw]);
 
-  // rAF 驱动
+  // ── rAF 驱动 ──
   useEffect(() => {
     if (!playing) {
       startTsRef.current = null;
@@ -89,7 +125,8 @@ export default function ReplayExperience({ series, stock, year, amount, locale =
       startTsRef.current = ts;
       accRef.current = Math.min(duration, accRef.current + dt);
       const nt = accRef.current / duration;
-      setT(nt);
+      tRef.current = nt;
+      draw(nt);
       if (nt >= 1) {
         setPlaying(false);
         setDone(true);
@@ -102,35 +139,34 @@ export default function ReplayExperience({ series, stock, year, amount, locale =
       cancelAnimationFrame(rafRef.current);
       startTsRef.current = null;
     };
-  }, [playing, speed, duration]);
+  }, [playing, speed, duration, draw]);
 
   const restart = () => {
     accRef.current = 0;
+    tRef.current = 0;
+    smoothRef.current = {};
     setDone(false);
-    setT(0);
     setPlaying(true);
   };
 
   const scrub = (v: number) => {
+    setPlaying(false);
     accRef.current = v * duration;
+    tRef.current = v;
+    smoothRef.current = {};
     setDone(v >= 1);
-    setT(v);
+    draw(v);
   };
 
   const shareImage = async () => {
+    if (!stats) return;
     setShareBusy(true);
     try {
-      const st = computeStats(input);
-      const blob = await buildShareImage({ stock, input, stats: st, locale });
+      const blob = await buildShareImage({ stock, input, stats, rawCloses: series.rawCloses });
       const file = new File([blob], `whatif-${stock.key}-${year}.png`, { type: 'image/png' });
-      const nav = navigator as Navigator & {
-        canShare?: (d: ShareData) => boolean;
-      };
+      const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
       if (nav.canShare?.({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `假如${year}年买入${stock.zh}`,
-        } as ShareData);
+        await navigator.share({ files: [file], title } as ShareData);
       } else {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -151,111 +187,174 @@ export default function ReplayExperience({ series, stock, year, amount, locale =
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
-      location.href = url; // 兜底无意义, 但保持类型完整
+      /* 剪贴板不可用时静默 */
     }
   };
 
   return (
-    <div className="mx-auto w-full max-w-[880px]">
+    <div className="mx-auto w-full max-w-[920px] px-4 py-5">
+      {/* ════════ 顶部状态栏: 左(返回+本金) / 中(大标题+梗) / 右(战报区) ════════ */}
+      <header className="grid grid-cols-[minmax(90px,auto)_1fr_minmax(150px,auto)] items-start gap-3 pb-4">
+        <div className="flex flex-col gap-1.5 pt-1">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1 text-xs text-white/50 transition hover:text-white"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M10 3 5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            返回
+          </Link>
+          <span className="font-mono text-xs text-white/35">{amountLabel} 本金</span>
+        </div>
+
+        <div className="min-w-0 text-center">
+          <h1 className="truncate text-lg font-black leading-snug tracking-tight sm:text-2xl">
+            {title}
+          </h1>
+          <p className="mt-0.5 truncate text-xs text-white/45">{meme || '一直持有 · 红利复投'}</p>
+        </div>
+
+        <div className="pt-0.5 text-right">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/35">
+            收益率
+          </div>
+          <div
+            ref={pctRef as React.RefObject<HTMLDivElement>}
+            className="font-mono text-3xl font-black leading-tight tabular-nums sm:text-4xl"
+            style={{ color: UP, textShadow: `0 0 18px ${UP}55` }}
+          >
+            +0.00%
+          </div>
+          <div className="mt-0.5 flex items-baseline justify-end gap-2 font-mono text-xs">
+            <span ref={plRef as React.RefObject<HTMLSpanElement>} className="tabular-nums">
+              +0万
+            </span>
+            <span ref={dateRef as React.RefObject<HTMLSpanElement>} className="text-white/40 tabular-nums">
+              {series.dates[input.start].slice(0, 4)}-
+              {series.dates[input.start].slice(4, 6)}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* ════════ 电影感图表舞台 ════════ */}
       <div
         ref={boxRef}
-        className="relative aspect-[16/10] w-full overflow-hidden rounded-2xl border border-white/10 bg-ink-950 shadow-[0_0_80px_-20px_rgba(255,59,48,0.35)] sm:aspect-[16/9]"
+        className="relative aspect-[16/10] w-full overflow-hidden rounded-2xl border border-white/10 bg-ink-950 shadow-[0_0_80px_-24px_rgba(255,59,48,0.4)] sm:aspect-[16/8]"
       >
         <canvas ref={canvasRef} className="block h-full w-full" />
-
-        {/* 播放/暂停点击层 */}
         <button
           type="button"
           aria-label={playing ? '暂停' : '播放'}
           className="absolute inset-0 h-full w-full cursor-pointer"
           onClick={() => {
-            if (t >= 1) restart();
+            if (tRef.current >= 1) restart();
             else setPlaying((p) => !p);
           }}
         />
+
+        {/* ════════ 终局结算战报: 背景压暗 + 弹簧卡 ════════ */}
+        {stats && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
+            <div className="wi-pop w-full max-w-md rounded-3xl border border-white/12 bg-ink-900/95 p-7 text-center shadow-2xl">
+              <div className="mx-auto inline-flex rounded-full border border-white/15 px-4 py-1 font-mono text-[11px] uppercase tracking-[0.25em] text-white/50">
+                最终收益率
+              </div>
+              <div
+                className="mt-4 font-mono text-6xl font-black tabular-nums sm:text-7xl"
+                style={{
+                  color: stats.returnPct >= 0 ? UP : DOWN,
+                  textShadow: `0 0 34px ${stats.returnPct >= 0 ? UP : DOWN}66`,
+                }}
+              >
+                {pct(stats.returnPct)}
+              </div>
+              <p className="mt-3 text-sm text-white/60">
+                最终剩余资产{' '}
+                <span className="font-bold text-white">{moneyZh(stats.finalValue)}</span>
+                （{stats.profit >= 0 ? '盈利' : '亏损'}{' '}
+                <span
+                  className="font-bold"
+                  style={{ color: stats.profit >= 0 ? UP : DOWN }}
+                >
+                  {profitZh(stats.profit)}
+                </span>
+                ）
+              </p>
+              <p className="mt-1 font-mono text-[11px] text-white/40">
+                {stats.years.toFixed(1)} 年 · 年化 {(stats.cagr * 100).toFixed(1)}% · 最大回撤{' '}
+                {(stats.maxDrawdown * 100).toFixed(0)}%
+              </p>
+              <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={shareImage}
+                  disabled={shareBusy}
+                  className="wi-rise flex-1 rounded-xl bg-up py-2.5 text-sm font-bold text-white shadow-[0_6px_20px_-6px_rgba(255,77,79,0.6)] transition active:scale-95 disabled:opacity-50"
+                >
+                  {shareBusy ? '生成中…' : '生成分享海报'}
+                </button>
+                <button
+                  type="button"
+                  onClick={shareLink}
+                  className="wi-rise flex-1 rounded-xl border border-white/15 py-2.5 text-sm font-semibold text-white/80 transition hover:border-white/30 active:scale-95"
+                  style={{ animationDelay: '80ms' }}
+                >
+                  {copied ? '已复制 ✓' : '复制战报链接'}
+                </button>
+                <button
+                  type="button"
+                  onClick={restart}
+                  className="wi-rise flex-1 rounded-xl border border-white/15 py-2.5 text-sm font-semibold text-white/80 transition hover:border-white/30 active:scale-95"
+                  style={{ animationDelay: '160ms' }}
+                >
+                  再测一次
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 总结卡(回放结束后展示, 不遮挡全局总览画面) */}
-      {stats && (
-        <div className="mt-4 rounded-2xl border border-white/10 bg-ink-800/90 p-5 backdrop-blur-md">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <span className="text-sm text-white/60">
-              {year} → {stats.endDate.slice(0, 4)} · {stats.years.toFixed(1)} 年 · 一直持有 · 红利复投
-            </span>
-            <span className="font-mono text-sm text-white/45">
-              年化 {(stats.cagr * 100).toFixed(1)}% · 最大回撤 {(stats.maxDrawdown * 100).toFixed(0)}%
-            </span>
-          </div>
-          <div className="mt-2 flex flex-wrap items-baseline gap-x-5 gap-y-1">
-            <span className="font-mono text-4xl font-extrabold tracking-tight text-white">
-              {money(stats.finalValue, locale)}
-            </span>
-            <span className={`font-mono text-xl font-bold ${stats.returnPct >= 0 ? 'text-up' : 'text-down'}`}>
-              {pct(stats.returnPct)}
-            </span>
-            <span className="font-mono text-lg text-white/70">{multiple(stats.multiple)}</span>
-          </div>
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              onClick={shareImage}
-              disabled={shareBusy}
-              className="flex-1 rounded-xl bg-up py-2.5 text-sm font-bold text-white transition active:scale-95 disabled:opacity-50"
-            >
-              {shareBusy ? '生成中…' : '生成分享图'}
-            </button>
-            <button
-              type="button"
-              onClick={shareLink}
-              className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm font-semibold text-white/80 transition active:scale-95"
-            >
-              {copied ? '已复制 ✓' : '复制链接'}
-            </button>
-            <button
-              type="button"
-              onClick={restart}
-              className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm font-semibold text-white/80 transition active:scale-95"
-            >
-              再看一遍 ↻
-            </button>
-          </div>
-        </div>
-      )}
+      {/* ════════ 底部状态信息 ════════ */}
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+        <span className="text-white/35">历史数据模拟，仅供娱乐与复盘</span>
+        <span ref={priceRef as React.RefObject<HTMLSpanElement>} className="font-mono text-white/35 tabular-nums">
+          {`买入价 ${usdPrice(series.rawCloses?.[input.start] ?? null)} · 当前收盘 ${usdPrice(
+            series.rawCloses?.[input.start] ?? null
+          )}`}
+        </span>
+      </div>
 
-      {/* 控制条 */}
-      <div className="mt-4 flex items-center gap-3">
+      {/* ════════ 播放控制 ════════ */}
+      <div className="mt-3 flex items-center gap-3">
         <button
           type="button"
-          onClick={() => (t >= 1 ? restart() : setPlaying((p) => !p))}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
+          onClick={() => (tRef.current >= 1 ? restart() : setPlaying((p) => !p))}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
           aria-label={playing ? '暂停' : '播放'}
         >
-          {t >= 1 ? (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          {tRef.current >= 1 || !playing ? (
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M3 2.5v11l10-5.5-10-5.5z" />
-            </svg>
-          ) : playing ? (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <rect x="3" y="2" width="3.5" height="12" rx="1" />
-              <rect x="9.5" y="2" width="3.5" height="12" rx="1" />
             </svg>
           ) : (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M3 2.5v11l10-5.5-10-5.5z" />
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="3" y="2" width="3.5" height="12" rx="1" />
+              <rect x="9.5" y="2" width="3.5" height="12" rx="1" />
             </svg>
           )}
         </button>
         <input
+          ref={scrubRef}
           type="range"
           min={0}
           max={1}
           step={0.001}
-          value={t}
-          onChange={(e) => {
-            setPlaying(false);
-            scrub(Number(e.target.value));
-          }}
-          className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/15 accent-[#ff3b30]"
+          defaultValue={0}
+          onChange={(e) => scrub(Number(e.target.value))}
+          className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/15"
           aria-label="进度"
         />
         <div className="flex shrink-0 overflow-hidden rounded-full border border-white/15">
@@ -275,10 +374,10 @@ export default function ReplayExperience({ series, stock, year, amount, locale =
         <button
           type="button"
           onClick={restart}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
           aria-label="重播"
         >
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
             <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" strokeLinecap="round" />
             <path d="M13.5 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>

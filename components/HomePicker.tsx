@@ -108,19 +108,16 @@ export default function HomePicker({ stocks, ranges }: Props) {
                 : 'bg-white/5 text-white/70 hover:bg-white/10'
             }`}
           >
-            {a >= 10000 ? `$${a / 10000}万` : `$${a / 1000}K`}
+            {a >= 10000 ? `${a / 10000}万` : a}
           </button>
         ))}
         <div className="relative">
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-white/40">
-            $
-          </span>
           <input
             inputMode="decimal"
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
-            placeholder="自定义"
-            className="w-28 rounded-full border border-white/10 bg-transparent py-2 pl-6 pr-3 font-mono text-sm text-white placeholder:text-white/25 focus:border-up/60 focus:outline-none"
+            placeholder="自定义金额"
+            className="w-28 rounded-full border border-white/10 bg-transparent py-2 pl-4 pr-3 font-mono text-sm text-white placeholder:text-white/25 focus:border-up/60 focus:outline-none"
           />
         </div>
       </div>
@@ -133,7 +130,7 @@ export default function HomePicker({ stocks, ranges }: Props) {
         开始穿越 ▶
       </button>
       <p className="mt-3 text-center text-[11px] text-white/30">
-        {year} 年投入 {effAmount >= 10000 ? `$${(effAmount / 10000).toFixed(0)}万` : `$${effAmount}`} · 一直持有到今天
+        {year} 年投入 {effAmount >= 10000 ? `${(effAmount / 10000).toFixed(0)}万` : effAmount} · 一直持有到今天
       </p>
     </section>
   );

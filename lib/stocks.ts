@@ -39,7 +39,8 @@ export interface Series {
   last: string;
   points: number;
   dates: string[]; // YYYYMMDD
-  closes: number[]; // 后复权收盘
+  closes: number[]; // 后复权收盘(计算用)
+  rawCloses?: (number | null)[]; // 不复权收盘(展示用), 与 dates 对齐
   fetchedAt: string;
 }
 

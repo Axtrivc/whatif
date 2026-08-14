@@ -44,3 +44,36 @@ input[type='range']::-moz-range-thumb {
     box-shadow: 0 0 90px -12px rgba(255, 59, 48, 0.75);
   }
 }
+
+/* 终局战报卡: 弹簧放大弹出(过冲) */
+@keyframes wi-pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.wi-pop {
+  animation: wi-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* 操作按钮组: 逐个优雅浮现 */
+@keyframes wi-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.wi-rise {
+  animation: wi-rise 0.4s ease-out both;
+}
