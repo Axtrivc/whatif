@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+::selection {
+  background: rgba(255, 59, 48, 0.35);
+}
+
+/* 进度条(range) */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #ff3b30;
+  box-shadow: 0 0 10px rgba(255, 59, 48, 0.6);
+  cursor: pointer;
+}
+input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 9999px;
+  background: #ff3b30;
+  cursor: pointer;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 60px -18px rgba(255, 59, 48, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 90px -12px rgba(255, 59, 48, 0.75);
+  }
+}

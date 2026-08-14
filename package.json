@@ -1,0 +1,27 @@
+{
+  "name": "whatif",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WhatIf - 假如当时买了 · Investment replay animation. What if you had bought X years ago?",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit",
+    "fetch-data": "node scripts/fetch-data.mjs"
+  },
+  "dependencies": {
+    "next": "^16.2.12",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.25",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5"
+  }
+}
