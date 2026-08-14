@@ -77,3 +77,53 @@ input[type='range']::-moz-range-thumb {
 .wi-rise {
   animation: wi-rise 0.4s ease-out both;
 }
+
+/* 行情走马灯: 无缝横向滚动 */
+@keyframes wi-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.wi-marquee {
+  animation: wi-marquee 36s linear infinite;
+}
+.wi-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* 舞台边框流光: 盈亏双色 conic 渐变旋转 */
+@keyframes wi-borderflow {
+  to {
+    --wi-angle: 360deg;
+  }
+}
+@property --wi-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+.wi-stage-flow {
+  position: relative;
+}
+.wi-stage-flow::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--wi-angle),
+    rgba(255, 77, 79, 0.65),
+    rgba(0, 245, 212, 0.45),
+    rgba(255, 77, 79, 0.05),
+    rgba(255, 77, 79, 0.65)
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: wi-borderflow 6s linear infinite;
+  pointer-events: none;
+}

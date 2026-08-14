@@ -67,9 +67,10 @@ export function computeStats(input: ReplayInput): ReplayStats {
   };
 }
 
-/** 动画时长(秒): 对齐原视频 1-2 分钟的节奏, 点数越多越长 */
+/** 动画时长(秒): 对齐参考视频 ~1.25月/秒 的慢节奏(约 21 交易日/秒),
+ *  1x 看清月度涨跌; 长回放靠 2x/4x 快进 */
 export function durationFor(points: number): number {
-  return Math.min(110, Math.max(20, points / 120));
+  return Math.min(240, Math.max(45, points / 21));
 }
 
 /** t∈[0,1] -> 当日索引(线性, 与抖音原视频一致的匀速快进感) */

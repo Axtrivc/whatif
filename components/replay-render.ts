@@ -36,8 +36,8 @@ const SANS = '"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
 const RED: [number, number, number] = [255, 77, 79]; // #FF4D4F 盈
 const CYAN: [number, number, number] = [0, 245, 212]; // #00F5D4 亏
 
-/** 窗口跨度(交易日): ~8 个月, 让月度涨跌清晰可见 */
-const SPAN_DAYS = 160;
+/** 窗口跨度(交易日): ~2 年, 对齐参考视频的窗口宽度 */
+const SPAN_DAYS = 500;
 
 function mixColor(f: number, alpha = 1): string {
   const r = Math.round(CYAN[0] + (RED[0] - CYAN[0]) * f);
@@ -103,12 +103,12 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const xOf = (i: number) => plotL + ((i - wStart) / (span - 1)) * plotW;
   const yOf = (v: number) => plotB - ((v - lo) / (hi - lo)) * plotH;
 
-  // ── Y 轴刻度(左侧, 左对齐) + 横向网格 ──
+  // ── Y 轴刻度(左侧, 左对齐, 6 档) + 横向网格 ──
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   ctx.font = `500 11px ${MONO}`;
-  for (let g = 0; g <= 3; g++) {
-    const gv = lo + ((hi - lo) * g) / 3;
+  for (let g = 0; g <= 5; g++) {
+    const gv = lo + ((hi - lo) * g) / 5;
     const gy = yOf(gv);
     ctx.strokeStyle = 'rgba(245,245,247,0.06)';
     ctx.lineWidth = 1;
@@ -120,12 +120,12 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.fillText(moneyZh(gv), 8, gy);
   }
 
-  // ── X 轴滚动刻度(跟随窗口平移) ──
+  // ── X 轴滚动刻度(6 档, 跟随窗口平移) ──
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   ctx.font = `400 11px ${MONO}`;
-  for (let g = 0; g <= 3; g++) {
-    const i = wStart + Math.round(((span - 1) * g) / 3);
+  for (let g = 0; g <= 5; g++) {
+    const i = wStart + Math.round(((span - 1) * g) / 5);
     const label = dateYM(input.dates[Math.min(i, input.end)]);
     ctx.fillStyle = 'rgba(245,245,247,0.3)';
     ctx.fillText(label, xOf(i), h - 10);

@@ -7,6 +7,7 @@ import { moneyZh, pct, profitZh, usdPrice } from '@/lib/format';
 import { startIndexForYear, type Series, type StockMeta } from '@/lib/stocks';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
 import { buildShareImage } from '@/components/ShareCard';
+import TickerTape from '@/components/TickerTape';
 
 interface Props {
   series: Series;
@@ -192,7 +193,7 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
   };
 
   return (
-    <div className="mx-auto w-full max-w-[920px] px-4 py-5">
+    <div className="mx-auto w-full max-w-[1200px] px-4 py-5">
       {/* ════════ 顶部状态栏: 左(返回+本金) / 中(大标题+梗) / 右(战报区) ════════ */}
       <header className="grid grid-cols-[minmax(90px,auto)_1fr_minmax(150px,auto)] items-start gap-3 pb-4">
         <div className="flex flex-col gap-1.5 pt-1">
@@ -238,10 +239,10 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
         </div>
       </header>
 
-      {/* ════════ 电影感图表舞台 ════════ */}
+      {/* ════════ 电影感图表舞台(宽幅 + 盈亏双色流光边框) ════════ */}
       <div
         ref={boxRef}
-        className="relative aspect-[16/10] w-full overflow-hidden rounded-2xl border border-white/10 bg-ink-950 shadow-[0_0_80px_-24px_rgba(255,59,48,0.4)] sm:aspect-[16/8]"
+        className="wi-stage-flow relative aspect-[16/9] w-full overflow-hidden rounded-2xl border border-white/10 bg-ink-950 shadow-[0_0_80px_-24px_rgba(255,59,48,0.4)] sm:aspect-[2.2/1]"
       >
         <canvas ref={canvasRef} className="block h-full w-full" />
         <button
@@ -316,6 +317,9 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
           </div>
         )}
       </div>
+
+      {/* ════════ 行情走马灯 ════════ */}
+      <TickerTape />
 
       {/* ════════ 底部状态信息 ════════ */}
       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
