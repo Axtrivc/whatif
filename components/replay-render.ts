@@ -115,10 +115,10 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const lineColor = mixColor(f);
   const glowColor = mixColor(f, 0.55);
 
-  // ── 布局: 左刻度槽 + 绘图区 + 底部刻度带 ──
+  // ── 布局: 左刻度槽 + 绘图区(右侧留白带, 光点不贴边) + 底部刻度带 ──
   const gutter = Math.round(Math.min(Math.max(w * 0.075, 46), 64));
   const plotL = gutter;
-  const plotR = w - 10;
+  const plotR = w - Math.round(Math.min(Math.max(w * 0.07, 44), 88));
   const plotT = 12;
   const plotB = h - 30;
   const plotW = plotR - plotL;
