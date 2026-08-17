@@ -20,10 +20,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const series = await loadSeries(key);
   const firstYear = series ? series.first.slice(0, 4) : '';
   const title = `假如${firstYear}年买入${meta.zh}，今天值多少钱？`;
+  const description = `${meta.zh}(${meta.symbol}) ${firstYear} 年至今的历史回测：动画回放${meta.zh}的长期回报，支持任意年份与本金。后复权口径，历史模拟仅供参考。`;
   return {
     title,
-    description: `${meta.zh}(${meta.symbol}) ${firstYear} 年至今的历史回测：动画回放${meta.zh}的长期回报，支持任意年份与本金。后复权口径，历史模拟仅供参考。`,
+    description,
     alternates: { canonical: `/p/${key}/` },
+    openGraph: {
+      title,
+      description,
+      url: `/p/${key}/`,
+      type: 'website',
+    },
   };
 }
 
@@ -64,6 +71,24 @@ export default async function StockLanding({ params }: Props) {
 
   return (
     <main className="mx-auto w-full max-w-3xl px-5 pb-16">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'BreadcrumbList',
+            itemListElement: [
+              { '@type': 'ListItem', position: 1, name: '假如当时买了', item: 'https://whatif.axtrivc.com/' },
+              {
+                '@type': 'ListItem',
+                position: 2,
+                name: `假如${firstYear}年买入${meta.zh}`,
+                item: `https://whatif.axtrivc.com/p/${key}/`,
+              },
+            ],
+          }),
+        }}
+      />
       <header className="flex items-center justify-between py-6">
         <Link href="/" className="flex items-center gap-2.5">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-up text-lg font-black text-white">

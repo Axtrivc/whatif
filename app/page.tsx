@@ -2,8 +2,13 @@ import HomePicker from '@/components/HomePicker';
 import { computeStats } from '@/lib/engine';
 import { loadSeries, STOCKS } from '@/lib/stocks';
 import Link from 'next/link';
+import type { Metadata } from 'next';
 
 export const revalidate = false;
+
+export const metadata: Metadata = {
+  alternates: { canonical: '/' },
+};
 
 const PRESETS: { key: string; year: number; amount: number }[] = [
   { key: 'msft', year: 1996, amount: 100_000 },
@@ -47,6 +52,21 @@ export default async function Home() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-5 pb-16">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'WebSite',
+            name: '假如当时买了 · WhatIf',
+            alternateName: 'WhatIf',
+            url: 'https://whatif.axtrivc.com/',
+            inLanguage: 'zh-CN',
+            description:
+              '选一只股票、一个年份、一笔本金，用动画逐日回放长期持有的复利之旅。历史数据模拟，仅供参考。',
+          }),
+        }}
+      />
       <header className="flex items-center justify-between py-6">
         <div className="flex items-center gap-2.5">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-up text-lg font-black text-white">
