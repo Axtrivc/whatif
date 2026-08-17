@@ -27,11 +27,16 @@ npm run build        # 静态导出到 out/
 ## 数据更新
 
 ```bash
-node scripts/fetch-data.mjs          # 全部标的
+node scripts/fetch-data.mjs          # 全部标的(美股/指数/黄金走东财, BTC 走 Bitstamp)
 node scripts/fetch-data.mjs msft btc # 指定标的
 ```
 
-标的目录在 `lib/stocks.ts` 的 `STOCKS` 与 `scripts/fetch-data.mjs` 的 `CATALOG` 中同步维护。
+脚本收尾会自动生成/刷新：
+
+- `public/data/index.json` — 各标的日期范围清单（与已有内容合并，sitemap 的 lastModified 用真实数据日期）
+- `public/data/ticker.json` — 全部标的最新真实价 + 日涨跌（首页走马灯数据源）
+
+标的目录在 `lib/stocks.ts` 的 `STOCKS`、`scripts/fetch-data.mjs` 的 `CATALOG`/`TICKER_ORDER` 中同步维护。
 新增标的：两处各加一行 → 跑 fetch-data → 落地页/站点地图自动生成。
 
 ## 部署
