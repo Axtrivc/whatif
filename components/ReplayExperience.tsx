@@ -18,7 +18,7 @@ interface Props {
 }
 
 const SPEEDS = [1, 2, 4] as const;
-const UP = '#FF4D4F';
+const UP = '#FF4C6C';
 const DOWN = '#00F5D4';
 
 /** 结算数字滚动(ease-out cubic, 从 0 滚到目标值) */
@@ -128,6 +128,7 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
       if (pctRef.current) {
         pctRef.current.textContent = pct(gain / amount);
         pctRef.current.style.color = upNow ? UP : DOWN;
+        pctRef.current.style.textShadow = `0 0 26px ${upNow ? UP : DOWN}66`;
       }
       if (plRef.current) plRef.current.textContent = profitZh(gain);
       if (plRef.current) plRef.current.style.color = upNow ? UP : DOWN;
@@ -306,14 +307,17 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
             </svg>
             返回
           </Link>
-          <span className="font-mono text-xs text-white/35">{amountLabel} 本金</span>
+          <span className="font-mono text-xs font-semibold text-white/55">{amountLabel} 本金</span>
         </div>
 
         <div className="min-w-0 text-center">
-          <h1 className="truncate text-lg font-black leading-snug tracking-tight sm:text-2xl">
-            {title}
+          <h1 className="truncate text-xl font-black leading-snug tracking-tight sm:text-3xl">
+            假如你在 {year}年 买入 {amountLabel}{' '}
+            <span style={{ color: UP, textShadow: `0 0 24px ${UP}59` }}>{stock.zh}</span>
           </h1>
-          <p className="mt-0.5 truncate text-xs text-white/45">{meme || '一直持有 · 红利复投'}</p>
+          <p className="mt-1 truncate text-sm font-semibold text-white/55">
+            {meme || '一直持有 · 红利复投'}
+          </p>
         </div>
 
         <div className="pt-0.5 text-right">
@@ -322,8 +326,8 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
           </div>
           <div
             ref={pctRef as React.RefObject<HTMLDivElement>}
-            className="font-mono text-3xl font-black leading-tight tabular-nums sm:text-4xl"
-            style={{ color: UP, textShadow: `0 0 18px ${UP}55` }}
+            className="text-4xl font-black leading-none tracking-tight tabular-nums sm:text-5xl"
+            style={{ color: UP, textShadow: `0 0 26px ${UP}66` }}
           >
             +0.00%
           </div>
@@ -342,7 +346,11 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
       {/* ════════ 电影感图表舞台(宽幅 + 盈亏双色流光边框) ════════ */}
       <div
         ref={boxRef}
-        className="wi-stage-flow relative aspect-[16/9] w-full overflow-hidden rounded-2xl border border-white/10 bg-ink-950 shadow-[0_0_80px_-24px_rgba(255,59,48,0.4)] sm:aspect-[2.2/1]"
+        className="wi-stage-flow relative aspect-[16/9] w-full overflow-hidden rounded-2xl border border-white/10 shadow-[0_0_80px_-24px_rgba(255,76,108,0.35)] sm:aspect-[2.2/1]"
+        style={{
+          background:
+            'radial-gradient(130% 105% at 50% 0%, #151c33 0%, #0c1122 55%, #070a14 100%)',
+        }}
       >
         <canvas ref={canvasRef} className="block h-full w-full" />
         <button

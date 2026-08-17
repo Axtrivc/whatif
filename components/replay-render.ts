@@ -2,16 +2,16 @@
  * 回放图表渲染器 — 纯函数 drawFrame(全历史累计展开版)
  *
  * canvas 只负责图表本体:
- *   左侧 Y 轴自适应刻度(弹性平滑) / 底部 X 轴时间刻度 / 本金虚线 / 历史峰值虚线 /
- *   全历史折线(从起点到当前时刻逐渐展开, 旧数据保留在左侧) /
- *   前沿呼吸光标(Pulsing Dot) + 跟随资产气泡 + 垂直参考虚线 /
- *   盈亏状态色(红↔青绿)无缝渐变 / 右下水印(安全区间距)
+ *   左侧 Y 轴自适应刻度(弹性平滑) / 底部 X 轴时间刻度(当前日期高亮框) /
+ *   全历史折线(从起点到当前时刻逐渐展开, 旧数据保留在左侧) + 渐变面积 /
+ *   前沿呼吸光标(径向大光晕 + 脉冲环) + 左侧跟随资产大字(发光无框) /
+ *   垂直参考虚线 / 盈亏状态色(红↔青绿)无缝渐变 / 右下水印(安全区间距)
  *
  * 标题/战报/终局卡等 chrome 全部由 DOM 承担(见 ReplayExperience)。
  *
  * 跨帧平滑状态(lo/hi/f)由调用方持有并经 smooth 传入 —— 渲染本身仍无副作用。
  */
-import { indexAtT, runningMaxInit, runningMaxStep, type ReplayInput } from '@/lib/engine';
+import { indexAtT, type ReplayInput } from '@/lib/engine';
 import { dateYM, moneyZh } from '@/lib/format';
 
 export interface SmoothState {
@@ -36,7 +36,7 @@ export interface ChartOpts {
 
 const MONO = 'ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace';
 const SANS = '"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
-const RED: [number, number, number] = [255, 77, 79]; // #FF4D4F 盈
+const RED: [number, number, number] = [255, 76, 108]; // #FF4C6C 盈(热粉)
 const CYAN: [number, number, number] = [0, 245, 212]; // #00F5D4 亏
 
 function mixColor(f: number, alpha = 1): string {
@@ -80,29 +80,13 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
           return t0 + (dateTs(input.dates[idx + 1]) - t0) * f;
         })();
 
-  // ── y 域目标(已走过的全部历史) + 里程碑点扫描(全程历史, 含回本/首破整数倍) ──
+  // ── y 域目标(已走过的全部历史) ──
   let vLo = Infinity;
   let vHi = -Infinity;
-  const dots: number[] = [];
-  let runMax = 1; // 起始即 1x 本金
-  let under = false; // 曾跌破本金
-  let peak = runningMaxInit(input); // 历史最高资产(画峰值虚线用)
   for (let i = input.start; i <= idx; i++) {
     const v = val(i);
     if (v < vLo) vLo = v;
     if (v > vHi) vHi = v;
-    peak = runningMaxStep(input.closes, peak, i);
-    const m = input.closes[i] / base;
-    if (m < 1) {
-      under = true;
-    } else if (under) {
-      under = false;
-      dots.push(i); // 回本点
-    }
-    if (m > runMax) {
-      if (m >= 2 && Math.floor(m) > Math.floor(runMax)) dots.push(i); // 首破整数倍
-      runMax = m;
-    }
   }
   // 前沿插值点也纳入 y 域, 让刻度随线头渐进扩张而非瞬跳
   if (value < vLo) vLo = value;
@@ -146,14 +130,14 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const xOf = (i: number) => xOfTs(dateTs(input.dates[i]));
   const yOf = (v: number) => plotB - ((v - lo) / (hi - lo)) * plotH;
 
-  // ── Y 轴刻度(左侧, 左对齐, 6 档) + 横向网格 ──
+  // ── Y 轴刻度(左侧, 左对齐, 6 档) + 横向网格 + 左竖轴线 ──
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   ctx.font = `500 11px ${MONO}`;
   for (let g = 0; g <= 5; g++) {
     const gv = lo + ((hi - lo) * g) / 5;
     const gy = yOf(gv);
-    ctx.strokeStyle = 'rgba(245,245,247,0.06)';
+    ctx.strokeStyle = 'rgba(245,245,247,0.05)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(plotL, gy);
@@ -162,6 +146,11 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.fillStyle = 'rgba(245,245,247,0.35)';
     ctx.fillText(moneyZh(gv), 8, gy);
   }
+  ctx.strokeStyle = 'rgba(245,245,247,0.1)';
+  ctx.beginPath();
+  ctx.moveTo(plotL + 0.5, plotT);
+  ctx.lineTo(plotL + 0.5, plotB);
+  ctx.stroke();
 
   // ── X 轴时间刻度(按年月边界动态稀疏, 随时间范围自动从月缩到年) ──
   ctx.textAlign = 'center';
@@ -182,6 +171,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     const ts = Date.UTC(y, m - 1, 1);
     if (ts > curTs) break;
     if (ts < startTs) continue;
+    if (ym === curYM) continue; // 当月由底部高亮框承担
     const x = xOfTs(ts);
     if (x < plotL + 20 || x > plotR - 20) continue;
     if (placedXs.length && x - placedXs[placedXs.length - 1] < 50) continue;
@@ -189,42 +179,6 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.fillStyle = 'rgba(245,245,247,0.3)';
     ctx.fillText(label, x, h - 10);
     placedXs.push(x);
-  }
-
-  // ── 本金虚线(在可视域内才画) ──
-  const py = yOf(amount);
-  if (py > plotT + 6 && py < plotB - 6) {
-    ctx.setLineDash([4, 5]);
-    ctx.strokeStyle = 'rgba(245,245,247,0.22)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(plotL, py);
-    ctx.lineTo(plotR, py);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.textAlign = 'right';
-    ctx.font = `500 10px ${SANS}`;
-    ctx.fillStyle = 'rgba(245,245,247,0.35)';
-    ctx.fillText('本金', plotR - 2, py - 7);
-  }
-
-  // ── 历史峰值虚线(截至当前进度的最高资产, 在可视域内才画) ──
-  if (peak.idx > input.start) {
-    const peakY = yOf(val(peak.idx));
-    if (peakY > plotT + 6 && peakY < plotB - 6) {
-      ctx.setLineDash([2, 4]);
-      ctx.strokeStyle = 'rgba(245,245,247,0.3)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(plotL, peakY);
-      ctx.lineTo(plotR, peakY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.textAlign = 'right';
-      ctx.font = `500 10px ${SANS}`;
-      ctx.fillStyle = 'rgba(245,245,247,0.45)';
-      ctx.fillText(`峰值 ${moneyZh(val(peak.idx))}`, plotR - 2, peakY - 7);
-    }
   }
 
   // ── 折线 + 渐变面积(裁剪进绘图区); 从起点到前沿逐帧生长 ──
@@ -241,7 +195,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.rect(plotL, plotT - 4, plotW, plotH + 8);
   ctx.clip();
   const area = ctx.createLinearGradient(0, plotT, 0, plotB);
-  area.addColorStop(0, mixColor(f, 0.26));
+  area.addColorStop(0, mixColor(f, 0.3));
   area.addColorStop(1, 'rgba(0,0,0,0)');
   drawPath();
   ctx.lineTo(headX, plotB);
@@ -249,46 +203,47 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.closePath();
   ctx.fillStyle = area;
   ctx.fill();
-  drawPath();
-  ctx.strokeStyle = lineColor;
-  ctx.lineWidth = 2.5;
+  // 霓虹双层描边: 宽晕底层 + 亮芯上层
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
+  drawPath();
+  ctx.strokeStyle = mixColor(f, 0.32);
+  ctx.lineWidth = 7;
   ctx.shadowColor = glowColor;
+  ctx.shadowBlur = 22;
+  ctx.stroke();
+  drawPath();
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 3;
   ctx.shadowBlur = 14;
   ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.restore();
 
-  // ── 里程碑小圆点(回本/首破整数倍, 永久留在折线上) ──
-  for (const di of dots) {
-    const dx = xOf(di);
-    const dy = yOf(val(di));
-    if (dy < plotT + 2 || dy > plotB - 2) continue;
-    ctx.beginPath();
-    ctx.arc(dx, dy, 3, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(245,245,247,0.85)';
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = mixColor(f, 0.7);
-    ctx.stroke();
-  }
-
   // 前沿坐标(小数插值点)
   const cx = headX;
   const cy = headY;
 
-  // ── 垂直参考虚线(贯穿到底) ──
+  // ── 垂直参考虚线(贯穿到底部高亮框) ──
   ctx.setLineDash([3, 4]);
-  ctx.strokeStyle = mixColor(f, 0.45);
+  ctx.strokeStyle = mixColor(f, 0.5);
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(cx, cy + 6);
+  ctx.moveTo(cx, cy + 8);
   ctx.lineTo(cx, plotB);
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // ── 呼吸光标: 实心点 + 白描边 + 扩散脉冲环(reduced-motion 下跳过脉冲) ──
+  // ── 前沿径向大光晕 ──
+  const halo = ctx.createRadialGradient(cx, cy, 1, cx, cy, 26);
+  halo.addColorStop(0, mixColor(f, 0.5));
+  halo.addColorStop(1, mixColor(f, 0));
+  ctx.beginPath();
+  ctx.arc(cx, cy, 26, 0, Math.PI * 2);
+  ctx.fillStyle = halo;
+  ctx.fill();
+
+  // ── 呼吸光标: 扩散脉冲环(reduced-motion 下跳过) ──
   if (!o.reduced) {
     const pulse = (ts / 1100) % 1;
     ctx.beginPath();
@@ -310,25 +265,43 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     }
   }
   ctx.beginPath();
-  ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+  ctx.arc(cx, cy, 5, 0, Math.PI * 2);
   ctx.fillStyle = lineColor;
   ctx.shadowColor = glowColor;
-  ctx.shadowBlur = 12;
+  ctx.shadowBlur = 14;
   ctx.fill();
   ctx.shadowBlur = 0;
   ctx.strokeStyle = 'rgba(255,255,255,0.9)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  // ── 跟随资产气泡 [ 108万 ● ] ──
+  // ── 跟随资产大字(光点左侧, 无框发光体; 左侧放不下时移到点上方) ──
   const label = moneyZh(value);
-  ctx.font = `700 13px ${MONO}`;
+  const fs = Math.round(Math.min(Math.max(w * 0.034, 20), 34));
+  ctx.font = `800 ${fs}px ${SANS}`;
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = lineColor;
   const tw = ctx.measureText(label).width;
-  const bw = tw + 34;
-  const bh = 26;
-  let bx = Math.min(Math.max(cx + 12, plotL), plotR - bw);
-  const by = Math.max(cy - 40, plotT + 2);
-  ctx.beginPath();
+  if (cx - 18 - tw > plotL + 4) {
+    ctx.textAlign = 'right';
+    ctx.fillText(label, cx - 18, cy);
+    ctx.fillText(label, cx - 18, cy); // 两遍叠亮
+  } else {
+    ctx.textAlign = 'center';
+    ctx.fillText(label, cx, cy - fs);
+    ctx.fillText(label, cx, cy - fs);
+  }
+  ctx.shadowBlur = 0;
+
+  // ── 当前日期高亮框(底部刻度带, 跟随前沿, 贴右缘不溢出) ──
+  const curLabel = dateYM(input.dates[Math.min(idx, input.end)]);
+  ctx.font = `600 11px ${MONO}`;
+  const cw = ctx.measureText(curLabel).width + 16;
+  const chh = 20;
+  const ccx = Math.min(Math.max(cx, plotL + cw / 2), w - 6 - cw / 2);
+  const ccy = h - 16;
   const rr = (x: number, y: number, w2: number, h2: number, r: number) => {
     ctx.moveTo(x + r, y);
     ctx.arcTo(x + w2, y, x + w2, y + h2, r);
@@ -337,20 +310,17 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.arcTo(x, y, x + w2, y, r);
     ctx.closePath();
   };
-  rr(bx, by, bw, bh, 8);
-  ctx.fillStyle = 'rgba(8,10,16,0.78)';
+  ctx.beginPath();
+  rr(ccx - cw / 2, ccy - chh / 2, cw, chh, 6);
+  ctx.fillStyle = 'rgba(10,13,24,0.85)';
   ctx.fill();
-  ctx.strokeStyle = mixColor(f, 0.85);
+  ctx.strokeStyle = mixColor(f, 0.75);
   ctx.lineWidth = 1;
   ctx.stroke();
-  ctx.textAlign = 'left';
+  ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(245,245,247,0.95)';
-  ctx.fillText(label, bx + 10, by + bh / 2 + 0.5);
-  ctx.beginPath();
-  ctx.arc(bx + bw - 13, by + bh / 2, 3.5, 0, Math.PI * 2);
   ctx.fillStyle = lineColor;
-  ctx.fill();
+  ctx.fillText(curLabel, ccx, ccy + 0.5);
 
   // ── 右下水印(安全区: 距底部刻度带 ≥20px) ──
   if (o.watermark) {
