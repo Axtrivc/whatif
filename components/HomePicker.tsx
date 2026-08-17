@@ -116,7 +116,9 @@ export default function HomePicker({ stocks, ranges }: Props) {
             inputMode="decimal"
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && play()}
             placeholder="自定义金额"
+            aria-label="自定义本金金额（美元）"
             className="w-28 rounded-full border border-white/10 bg-transparent py-2 pl-4 pr-3 font-mono text-sm text-white placeholder:text-white/25 focus:border-up/60 focus:outline-none"
           />
         </div>

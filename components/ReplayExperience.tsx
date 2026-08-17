@@ -352,7 +352,12 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
             'radial-gradient(130% 105% at 50% 0%, #151c33 0%, #0c1122 55%, #070a14 100%)',
         }}
       >
-        <canvas ref={canvasRef} className="block h-full w-full" />
+        <canvas
+          ref={canvasRef}
+          className="block h-full w-full"
+          role="img"
+          aria-label={`${stock.zh} ${year} 年买入后逐日持有的资产曲线动画`}
+        />
         <button
           type="button"
           aria-label={playing ? '暂停' : '播放'}
@@ -471,12 +476,13 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
           className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/15"
           aria-label="进度"
         />
-        <div className="flex shrink-0 overflow-hidden rounded-full border border-white/15">
+        <div className="flex shrink-0 overflow-hidden rounded-full border border-white/15" role="group" aria-label="播放速度">
           {SPEEDS.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => setSpeed(s)}
+              aria-pressed={speed === s}
               className={`px-2.5 py-1 text-xs font-semibold transition ${
                 speed === s ? 'bg-white/15 text-white' : 'text-white/50 hover:text-white/80'
               }`}
@@ -497,6 +503,9 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
           </svg>
         </button>
       </div>
+      <p className="mt-2 text-center text-[10px] text-white/25">
+        空格 播放/暂停 · ← → 快退/快进 5 秒 · R 重播
+      </p>
     </div>
   );
 }
