@@ -21,6 +21,31 @@ const SPEEDS = [1, 2, 4] as const;
 const UP = '#FF4D4F';
 const DOWN = '#00F5D4';
 
+/** 结算数字滚动(ease-out cubic, 从 0 滚到目标值) */
+function CountUp({
+  target,
+  format,
+  duration = 1100,
+}: {
+  target: number;
+  format: (v: number) => string;
+  duration?: number;
+}) {
+  const [text, setText] = useState(() => format(0));
+  useEffect(() => {
+    let raf = 0;
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min((now - t0) / duration, 1);
+      setText(format(target * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, format, duration]);
+  return <>{text}</>;
+}
+
 export default function ReplayExperience({ series, stock, year, amount, meme }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -34,6 +59,9 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
   const accRef = useRef(0);
   const tRef = useRef(0);
   const smoothRef = useRef<SmoothState>({});
+  const finaleTimerRef = useRef(0); // 终点停留计时器
+  const maxMultRef = useRef(1); // 里程碑检测: 历史最高倍数
+  const underRef = useRef(false); // 里程碑检测: 曾跌破本金
 
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
@@ -120,17 +148,37 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
       startTsRef.current = null;
       return;
     }
+    // 首尾变速: 开场 4.5% 慢启动, 结尾 7% 减速撞线(acc 始终线性, 滑块与内容不错位)
+    const ss = (x: number) => {
+      const c = Math.min(Math.max(x, 0), 1);
+      return c * c * (3 - 2 * c);
+    };
+    const paceMod = (p: number) => 0.3 + 0.7 * Math.min(ss(p / 0.045), ss((1 - p) / 0.07));
     const tick = (ts: number) => {
       if (startTsRef.current == null) startTsRef.current = ts;
-      const dt = ((ts - startTsRef.current) / 1000) * speed;
+      const dt = ((ts - startTsRef.current) / 1000) * speed * paceMod(accRef.current / duration);
       startTsRef.current = ts;
       accRef.current = Math.min(duration, accRef.current + dt);
       const nt = accRef.current / duration;
       tRef.current = nt;
+      // 里程碑检测(回本 / 首破整数倍) → 渲染层闪光
+      const i = Math.min(input.end, input.start + Math.floor(nt * (input.end - input.start + 1)));
+      const m = input.closes[i] / input.closes[input.start];
+      if (m < 1) {
+        underRef.current = true;
+      } else if (underRef.current) {
+        underRef.current = false;
+        smoothRef.current.flashTs = ts;
+      }
+      if (m > maxMultRef.current) {
+        if (m >= 2 && Math.floor(m) > Math.floor(maxMultRef.current)) smoothRef.current.flashTs = ts;
+        maxMultRef.current = m;
+      }
       draw(nt);
       if (nt >= 1) {
         setPlaying(false);
-        setDone(true);
+        // 终点停留 0.9s(定格终值 + 光标脉冲)再弹结算卡
+        finaleTimerRef.current = window.setTimeout(() => setDone(true), 900);
         return;
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -140,21 +188,30 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
       cancelAnimationFrame(rafRef.current);
       startTsRef.current = null;
     };
-  }, [playing, speed, duration, draw]);
+  }, [playing, speed, duration, draw, input]);
+
+  // 卸载时清理终点计时器
+  useEffect(() => () => window.clearTimeout(finaleTimerRef.current), []);
 
   const restart = () => {
+    window.clearTimeout(finaleTimerRef.current);
     accRef.current = 0;
     tRef.current = 0;
     smoothRef.current = {};
+    maxMultRef.current = 1;
+    underRef.current = false;
     setDone(false);
     setPlaying(true);
   };
 
   const scrub = (v: number) => {
+    window.clearTimeout(finaleTimerRef.current);
     setPlaying(false);
     accRef.current = v * duration;
     tRef.current = v;
     smoothRef.current = {};
+    maxMultRef.current = 1;
+    underRef.current = false;
     setDone(v >= 1);
     draw(v);
   };
@@ -269,11 +326,13 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
                   textShadow: `0 0 34px ${stats.returnPct >= 0 ? UP : DOWN}66`,
                 }}
               >
-                {pct(stats.returnPct)}
+                <CountUp target={stats.returnPct} format={pct} />
               </div>
               <p className="mt-3 text-sm text-white/60">
                 最终剩余资产{' '}
-                <span className="font-bold text-white">{moneyZh(stats.finalValue)}</span>
+                <span className="font-bold text-white">
+                  <CountUp target={stats.finalValue} format={moneyZh} duration={1300} />
+                </span>
                 （{stats.profit >= 0 ? '盈利' : '亏损'}{' '}
                 <span
                   className="font-bold"

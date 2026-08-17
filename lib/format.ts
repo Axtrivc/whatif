@@ -21,7 +21,7 @@ export function profitZh(v: number): string {
   const sign = v >= 0 ? '+' : '-';
   const abs = Math.abs(v);
   if (abs >= 1e8) return `${sign}${trim(abs / 1e8, 2)}亿`;
-  if (abs >= 1e6) return `${sign}${trim(abs / 1e6, 0)}万`;
+  if (abs >= 1e6) return `${sign}${trim(abs / 1e4, 0)}万`;
   if (abs >= 1e4) return `${sign}${trim(abs / 1e4, 2)}万`;
   return `${sign}${trim(abs, 0)}`;
 }

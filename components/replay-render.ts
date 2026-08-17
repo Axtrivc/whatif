@@ -18,6 +18,8 @@ export interface SmoothState {
   lo?: number; // 平滑后的 y 域下限(资产值)
   hi?: number; // 平滑后的 y 域上限
   f?: number; // 盈亏状态色因子 0=青绿 1=红
+  ts?: number; // 上一帧时间戳(帧率无关阻尼用)
+  flashTs?: number; // 最近一次里程碑闪光时刻(回本/首破整数倍)
 }
 
 export interface ChartOpts {
@@ -64,30 +66,50 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const wEnd = Math.max(idx + 1, Math.min(input.start + span, input.end + 1));
   const wStart = Math.max(input.start, wEnd - span);
 
-  // ── y 域目标(窗口内已走过部分) → 弹性平滑 ──
+  // ── y 域目标(窗口内已走过部分) + 里程碑点扫描(全程历史, 含回本/首破整数倍) ──
   let vLo = Infinity;
   let vHi = -Infinity;
-  for (let i = wStart; i <= idx; i++) {
+  const dots: number[] = [];
+  let runMax = 1; // 起始即 1x 本金
+  let under = false; // 曾跌破本金
+  for (let i = input.start; i <= idx; i++) {
     const v = val(i);
-    if (v < vLo) vLo = v;
-    if (v > vHi) vHi = v;
+    if (i >= wStart) {
+      if (v < vLo) vLo = v;
+      if (v > vHi) vHi = v;
+    }
+    const m = input.closes[i] / base;
+    if (m < 1) {
+      under = true;
+    } else if (under) {
+      under = false;
+      if (i >= wStart) dots.push(i); // 回本点
+    }
+    if (m > runMax) {
+      if (m >= 2 && Math.floor(m) > Math.floor(runMax) && i >= wStart) dots.push(i); // 首破整数倍
+      runMax = m;
+    }
   }
   const padY = Math.max((vHi - vLo) * 0.12, vHi * 0.05);
   const tLo = vLo - padY;
   const tHi = vHi + padY;
+  // 帧率无关阻尼(以 60fps 系数为基准) + 快攻慢放(域扩张快跟防裁剪, 收缩慢降防抖)
+  const dtMs = smooth.ts == null ? 16.7 : Math.min(Math.max(ts - smooth.ts, 1), 100);
+  smooth.ts = ts;
+  const damp = (b: number) => 1 - Math.pow(1 - b, dtMs / 16.667);
   if (smooth.lo == null || smooth.hi == null) {
     smooth.lo = tLo;
     smooth.hi = tHi;
   } else {
-    smooth.lo += (tLo - smooth.lo) * 0.12;
-    smooth.hi += (tHi - smooth.hi) * 0.12;
+    smooth.lo += (tLo - smooth.lo) * damp(tLo < smooth.lo ? 0.35 : 0.06);
+    smooth.hi += (tHi - smooth.hi) * damp(tHi > smooth.hi ? 0.35 : 0.06);
   }
   const lo = smooth.lo;
   const hi = Math.max(smooth.hi, smooth.lo + 1e-9);
 
   // ── 盈亏状态色: 红↔青绿 无缝过渡 ──
   const targetF = value >= amount ? 1 : 0;
-  smooth.f = smooth.f == null ? targetF : smooth.f + (targetF - smooth.f) * 0.07;
+  smooth.f = smooth.f == null ? targetF : smooth.f + (targetF - smooth.f) * damp(0.07);
   const f = smooth.f;
   const lineColor = mixColor(f);
   const glowColor = mixColor(f, 0.55);
@@ -178,6 +200,20 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.shadowBlur = 0;
   ctx.restore();
 
+  // ── 里程碑小圆点(回本/首破整数倍, 永久留在折线上随窗口滚走) ──
+  for (const di of dots) {
+    const dx = xOf(di);
+    const dy = yOf(val(di));
+    if (dy < plotT + 2 || dy > plotB - 2) continue;
+    ctx.beginPath();
+    ctx.arc(dx, dy, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(245,245,247,0.85)';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = mixColor(f, 0.7);
+    ctx.stroke();
+  }
+
   // 前沿坐标
   const cx = xOf(idx);
   const cy = yOf(value);
@@ -199,6 +235,18 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.strokeStyle = mixColor(f, 0.55 * (1 - pulse));
   ctx.lineWidth = 1.5;
   ctx.stroke();
+
+  // ── 里程碑闪光(突破瞬间的一次性扩散亮环, ~0.5s) ──
+  if (smooth.flashTs != null) {
+    const ft = (ts - smooth.flashTs) / 480;
+    if (ft >= 0 && ft < 1) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, 7 + 26 * ft, 0, Math.PI * 2);
+      ctx.strokeStyle = mixColor(f, 0.85 * (1 - ft));
+      ctx.lineWidth = 2.5 - 1.5 * ft;
+      ctx.stroke();
+    }
+  }
   ctx.beginPath();
   ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
   ctx.fillStyle = lineColor;
