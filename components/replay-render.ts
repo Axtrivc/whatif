@@ -1,9 +1,9 @@
 /**
- * 回放图表渲染器 — 纯函数 drawFrame(电影感滑动镜头版)
+ * 回放图表渲染器 — 纯函数 drawFrame(全历史累计展开版)
  *
  * canvas 只负责图表本体:
- *   左侧 Y 轴自适应刻度(弹性平滑) / 底部 X 轴滚动刻度 / 本金虚线 / 历史峰值虚线 /
- *   滑动窗口折线(固定 6-12 个月跨度, 旧数据向左滚出) /
+ *   左侧 Y 轴自适应刻度(弹性平滑) / 底部 X 轴时间刻度 / 本金虚线 / 历史峰值虚线 /
+ *   全历史折线(从起点到当前时刻逐渐展开, 旧数据保留在左侧) /
  *   前沿呼吸光标(Pulsing Dot) + 跟随资产气泡 + 垂直参考虚线 /
  *   盈亏状态色(红↔青绿)无缝渐变 / 右下水印(安全区间距)
  *
@@ -39,9 +39,6 @@ const SANS = '"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
 const RED: [number, number, number] = [255, 77, 79]; // #FF4D4F 盈
 const CYAN: [number, number, number] = [0, 245, 212]; // #00F5D4 亏
 
-/** 窗口跨度(交易日): ~2 年, 对齐参考视频的窗口宽度 */
-const SPAN_DAYS = 500;
-
 function mixColor(f: number, alpha = 1): string {
   const r = Math.round(CYAN[0] + (RED[0] - CYAN[0]) * f);
   const g = Math.round(CYAN[1] + (RED[1] - CYAN[1]) * f);
@@ -59,15 +56,31 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const base = input.closes[input.start];
   const amount = input.amount;
   const val = (i: number) => (amount * input.closes[i]) / base;
-  const value = val(idx);
 
-  // ── 滑动镜头窗口: 头部钉在右缘, 旧数据向左滚出 ──
+  // ── 小数进度: 前沿在相邻两日间逐帧插值滑动, 消除按日瞬移 ──
   const n = input.end - input.start;
-  const span = Math.min(SPAN_DAYS, n + 1);
-  const wEnd = Math.max(idx + 1, Math.min(input.start + span, input.end + 1));
-  const wStart = Math.max(input.start, wEnd - span);
+  const headPos = Math.min(input.start + t * (n + 1), input.end);
+  const valF = (x: number) => {
+    const i = Math.max(input.start, Math.min(input.end - 1, Math.floor(x)));
+    const f = Math.min(Math.max(x - i, 0), 1);
+    return val(i) + (val(i + 1) - val(i)) * f;
+  };
+  const value = valF(headPos);
 
-  // ── y 域目标(窗口内已走过部分) + 里程碑点扫描(全程历史, 含回本/首破整数倍) ──
+  // ── 时间轴映射: x 按真实日历时间均匀展开, 与参考视频一致 ──
+  const dateTs = (d: string) => Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8));
+  const startTs = dateTs(input.dates[input.start]);
+  const endTs = dateTs(input.dates[input.end]);
+  const curTs =
+    idx >= input.end
+      ? endTs
+      : (() => {
+          const f = headPos - idx;
+          const t0 = dateTs(input.dates[idx]);
+          return t0 + (dateTs(input.dates[idx + 1]) - t0) * f;
+        })();
+
+  // ── y 域目标(已走过的全部历史) + 里程碑点扫描(全程历史, 含回本/首破整数倍) ──
   let vLo = Infinity;
   let vHi = -Infinity;
   const dots: number[] = [];
@@ -76,25 +89,26 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   let peak = runningMaxInit(input); // 历史最高资产(画峰值虚线用)
   for (let i = input.start; i <= idx; i++) {
     const v = val(i);
-    if (i >= wStart) {
-      if (v < vLo) vLo = v;
-      if (v > vHi) vHi = v;
-    }
+    if (v < vLo) vLo = v;
+    if (v > vHi) vHi = v;
     peak = runningMaxStep(input.closes, peak, i);
     const m = input.closes[i] / base;
     if (m < 1) {
       under = true;
     } else if (under) {
       under = false;
-      if (i >= wStart) dots.push(i); // 回本点
+      dots.push(i); // 回本点
     }
     if (m > runMax) {
-      if (m >= 2 && Math.floor(m) > Math.floor(runMax) && i >= wStart) dots.push(i); // 首破整数倍
+      if (m >= 2 && Math.floor(m) > Math.floor(runMax)) dots.push(i); // 首破整数倍
       runMax = m;
     }
   }
+  // 前沿插值点也纳入 y 域, 让刻度随线头渐进扩张而非瞬跳
+  if (value < vLo) vLo = value;
+  if (value > vHi) vHi = value;
   const padY = Math.max((vHi - vLo) * 0.12, vHi * 0.05);
-  const tLo = vLo - padY;
+  const tLo = Math.max(0, vLo - padY);
   const tHi = vHi + padY;
   // 帧率无关阻尼(以 60fps 系数为基准) + 快攻慢放(域扩张快跟防裁剪, 收缩慢降防抖)
   const dtMs = smooth.ts == null ? 16.7 : Math.min(Math.max(ts - smooth.ts, 1), 100);
@@ -125,7 +139,11 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const plotB = h - 30;
   const plotW = plotR - plotL;
   const plotH = plotB - plotT;
-  const xOf = (i: number) => plotL + ((i - wStart) / (span - 1)) * plotW;
+  const xOfTs = (ts: number) => {
+    if (curTs <= startTs) return plotL;
+    return plotL + ((ts - startTs) / (curTs - startTs)) * plotW;
+  };
+  const xOf = (i: number) => xOfTs(dateTs(input.dates[i]));
   const yOf = (v: number) => plotB - ((v - lo) / (hi - lo)) * plotH;
 
   // ── Y 轴刻度(左侧, 左对齐, 6 档) + 横向网格 ──
@@ -145,15 +163,32 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.fillText(moneyZh(gv), 8, gy);
   }
 
-  // ── X 轴滚动刻度(6 档, 跟随窗口平移) ──
+  // ── X 轴时间刻度(按年月边界动态稀疏, 随时间范围自动从月缩到年) ──
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   ctx.font = `400 11px ${MONO}`;
-  for (let g = 0; g <= 5; g++) {
-    const i = wStart + Math.round(((span - 1) * g) / 5);
-    const label = dateYM(input.dates[Math.min(i, input.end)]);
+  const startDate = new Date(startTs);
+  const startYM = startDate.getUTCFullYear() * 12 + startDate.getUTCMonth();
+  const curDate = new Date(curTs);
+  const curYM = curDate.getUTCFullYear() * 12 + curDate.getUTCMonth();
+  const totalMonths = curYM - startYM + 1;
+  const steps = [1, 2, 3, 6, 12, 24, 60, 120];
+  const step = steps.find((s) => totalMonths / s <= 7) ?? steps[steps.length - 1];
+  const firstYM = Math.ceil(startYM / step) * step;
+  const placedXs: number[] = [];
+  for (let ym = firstYM; ; ym += step) {
+    const y = Math.floor(ym / 12);
+    const m = (ym % 12) + 1;
+    const ts = Date.UTC(y, m - 1, 1);
+    if (ts > curTs) break;
+    if (ts < startTs) continue;
+    const x = xOfTs(ts);
+    if (x < plotL + 20 || x > plotR - 20) continue;
+    if (placedXs.length && x - placedXs[placedXs.length - 1] < 50) continue;
+    const label = `${y}-${String(m).padStart(2, '0')}`;
     ctx.fillStyle = 'rgba(245,245,247,0.3)';
-    ctx.fillText(label, xOf(i), h - 10);
+    ctx.fillText(label, x, h - 10);
+    placedXs.push(x);
   }
 
   // ── 本金虚线(在可视域内才画) ──
@@ -192,11 +227,14 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     }
   }
 
-  // ── 折线 + 渐变面积(裁剪进绘图区) ──
+  // ── 折线 + 渐变面积(裁剪进绘图区); 从起点到前沿逐帧生长 ──
+  const headX = curTs > startTs ? plotR : plotL;
+  const headY = yOf(value);
   const drawPath = () => {
     ctx.beginPath();
-    ctx.moveTo(xOf(wStart), yOf(val(wStart)));
-    for (let i = wStart + 1; i <= idx; i++) ctx.lineTo(xOf(i), yOf(val(i)));
+    ctx.moveTo(plotL, yOf(val(input.start)));
+    for (let i = input.start + 1; i <= idx; i++) ctx.lineTo(xOf(i), yOf(val(i)));
+    ctx.lineTo(headX, headY);
   };
   ctx.save();
   ctx.beginPath();
@@ -206,8 +244,8 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   area.addColorStop(0, mixColor(f, 0.26));
   area.addColorStop(1, 'rgba(0,0,0,0)');
   drawPath();
-  ctx.lineTo(xOf(idx), plotB);
-  ctx.lineTo(xOf(wStart), plotB);
+  ctx.lineTo(headX, plotB);
+  ctx.lineTo(plotL, plotB);
   ctx.closePath();
   ctx.fillStyle = area;
   ctx.fill();
@@ -222,7 +260,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.shadowBlur = 0;
   ctx.restore();
 
-  // ── 里程碑小圆点(回本/首破整数倍, 永久留在折线上随窗口滚走) ──
+  // ── 里程碑小圆点(回本/首破整数倍, 永久留在折线上) ──
   for (const di of dots) {
     const dx = xOf(di);
     const dy = yOf(val(di));
@@ -236,9 +274,9 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.stroke();
   }
 
-  // 前沿坐标
-  const cx = xOf(idx);
-  const cy = yOf(value);
+  // 前沿坐标(小数插值点)
+  const cx = headX;
+  const cy = headY;
 
   // ── 垂直参考虚线(贯穿到底) ──
   ctx.setLineDash([3, 4]);
