@@ -2,7 +2,7 @@
  * 回放图表渲染器 — 纯函数 drawFrame(电影感滑动镜头版)
  *
  * canvas 只负责图表本体:
- *   左侧 Y 轴自适应刻度(弹性平滑) / 底部 X 轴滚动刻度 / 本金虚线 /
+ *   左侧 Y 轴自适应刻度(弹性平滑) / 底部 X 轴滚动刻度 / 本金虚线 / 历史峰值虚线 /
  *   滑动窗口折线(固定 6-12 个月跨度, 旧数据向左滚出) /
  *   前沿呼吸光标(Pulsing Dot) + 跟随资产气泡 + 垂直参考虚线 /
  *   盈亏状态色(红↔青绿)无缝渐变 / 右下水印(安全区间距)
@@ -11,7 +11,7 @@
  *
  * 跨帧平滑状态(lo/hi/f)由调用方持有并经 smooth 传入 —— 渲染本身仍无副作用。
  */
-import { indexAtT, type ReplayInput } from '@/lib/engine';
+import { indexAtT, runningMaxInit, runningMaxStep, type ReplayInput } from '@/lib/engine';
 import { dateYM, moneyZh } from '@/lib/format';
 
 export interface SmoothState {
@@ -31,6 +31,7 @@ export interface ChartOpts {
   input: ReplayInput;
   smooth: SmoothState;
   watermark?: string;
+  reduced?: boolean; // prefers-reduced-motion: 关闭脉冲环/里程碑闪光
 }
 
 const MONO = 'ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace';
@@ -72,12 +73,14 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const dots: number[] = [];
   let runMax = 1; // 起始即 1x 本金
   let under = false; // 曾跌破本金
+  let peak = runningMaxInit(input); // 历史最高资产(画峰值虚线用)
   for (let i = input.start; i <= idx; i++) {
     const v = val(i);
     if (i >= wStart) {
       if (v < vLo) vLo = v;
       if (v > vHi) vHi = v;
     }
+    peak = runningMaxStep(input.closes, peak, i);
     const m = input.closes[i] / base;
     if (m < 1) {
       under = true;
@@ -170,6 +173,25 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.fillText('本金', plotR - 2, py - 7);
   }
 
+  // ── 历史峰值虚线(截至当前进度的最高资产, 在可视域内才画) ──
+  if (peak.idx > input.start) {
+    const peakY = yOf(val(peak.idx));
+    if (peakY > plotT + 6 && peakY < plotB - 6) {
+      ctx.setLineDash([2, 4]);
+      ctx.strokeStyle = 'rgba(245,245,247,0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(plotL, peakY);
+      ctx.lineTo(plotR, peakY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.textAlign = 'right';
+      ctx.font = `500 10px ${SANS}`;
+      ctx.fillStyle = 'rgba(245,245,247,0.45)';
+      ctx.fillText(`峰值 ${moneyZh(val(peak.idx))}`, plotR - 2, peakY - 7);
+    }
+  }
+
   // ── 折线 + 渐变面积(裁剪进绘图区) ──
   const drawPath = () => {
     ctx.beginPath();
@@ -228,16 +250,18 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // ── 呼吸光标: 实心点 + 白描边 + 扩散脉冲环 ──
-  const pulse = (ts / 1100) % 1;
-  ctx.beginPath();
-  ctx.arc(cx, cy, 6 + 9 * pulse, 0, Math.PI * 2);
-  ctx.strokeStyle = mixColor(f, 0.55 * (1 - pulse));
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
+  // ── 呼吸光标: 实心点 + 白描边 + 扩散脉冲环(reduced-motion 下跳过脉冲) ──
+  if (!o.reduced) {
+    const pulse = (ts / 1100) % 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6 + 9 * pulse, 0, Math.PI * 2);
+    ctx.strokeStyle = mixColor(f, 0.55 * (1 - pulse));
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
 
-  // ── 里程碑闪光(突破瞬间的一次性扩散亮环, ~0.5s) ──
-  if (smooth.flashTs != null) {
+  // ── 里程碑闪光(突破瞬间的一次性扩散亮环, ~0.5s, reduced-motion 下跳过) ──
+  if (!o.reduced && smooth.flashTs != null) {
     const ft = (ts - smooth.flashTs) / 480;
     if (ft >= 0 && ft < 1) {
       ctx.beginPath();

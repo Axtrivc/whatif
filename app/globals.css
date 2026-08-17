@@ -127,3 +127,12 @@ input[type='range']::-moz-range-thumb {
   animation: wi-borderflow 6s linear infinite;
   pointer-events: none;
 }
+
+/* prefers-reduced-motion: 关闭边框流光/走马灯/结算卡弹入动画 */
+@media (prefers-reduced-motion: reduce) {
+  .wi-stage-flow::before,
+  .wi-marquee,
+  .wi-pop {
+    animation: none;
+  }
+}

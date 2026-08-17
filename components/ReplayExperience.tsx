@@ -82,6 +82,11 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
 
   const duration = useMemo(() => durationFor(input.end - input.start), [input]);
   const stats = useMemo(() => (done ? computeStats(input) : null), [done, input]);
+  // prefers-reduced-motion: 关脉冲/闪光/CSS 动画, 自动播放直跳终点
+  const reduced = useMemo(
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    []
+  );
   const amountLabel = moneyZh(amount);
   const title = `假如你在 ${year}年 买入 ${amountLabel} ${stock.zh}`;
 
@@ -111,6 +116,7 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
         input,
         smooth: smoothRef.current,
         watermark: 'whatif.axtrivc.com',
+        reduced,
       });
 
       // 右上角战报 + 底部价格直写
@@ -135,7 +141,7 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
         scrubRef.current.value = String(tt);
       }
     },
-    [input, series]
+    [input, series, reduced]
   );
 
   useEffect(() => {
@@ -193,7 +199,7 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
   // 卸载时清理终点计时器
   useEffect(() => () => window.clearTimeout(finaleTimerRef.current), []);
 
-  const restart = () => {
+  const restart = useCallback(() => {
     window.clearTimeout(finaleTimerRef.current);
     accRef.current = 0;
     tRef.current = 0;
@@ -202,19 +208,56 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
     underRef.current = false;
     setDone(false);
     setPlaying(true);
-  };
+  }, []);
 
-  const scrub = (v: number) => {
-    window.clearTimeout(finaleTimerRef.current);
-    setPlaying(false);
-    accRef.current = v * duration;
-    tRef.current = v;
-    smoothRef.current = {};
-    maxMultRef.current = 1;
-    underRef.current = false;
-    setDone(v >= 1);
-    draw(v);
-  };
+  const scrub = useCallback(
+    (v: number) => {
+      window.clearTimeout(finaleTimerRef.current);
+      setPlaying(false);
+      accRef.current = v * duration;
+      tRef.current = v;
+      smoothRef.current = {};
+      maxMultRef.current = 1;
+      underRef.current = false;
+      setDone(v >= 1);
+      draw(v);
+    },
+    [duration, draw]
+  );
+
+  // reduced-motion: 首次自动播放改为直接定格终点出结算卡
+  useEffect(() => {
+    if (reduced) scrub(1);
+  }, [reduced, scrub]);
+
+  // ── 快捷键: 空格=播放/暂停(终点重播) ←/→=快退/快进5s R=重播 ──
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.tagName === 'SELECT' ||
+          el.isContentEditable)
+      )
+        return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (tRef.current >= 1) restart();
+        else setPlaying((p) => !p);
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const step = (e.key === 'ArrowRight' ? 5 : -5) / duration;
+        scrub(Math.min(1, Math.max(0, tRef.current + step)));
+      } else if (e.key === 'r' || e.key === 'R') {
+        restart();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [duration, restart, scrub]);
 
   const shareImage = async () => {
     if (!stats) return;
