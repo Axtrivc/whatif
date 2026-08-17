@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import ReplayExperience from '@/components/ReplayExperience';
-import { STOCK_MAP, type Series } from '@/lib/stocks';
+import { STOCK_MAP, startIndexForYear, type Series } from '@/lib/stocks';
 
 export default function ReplayClient() {
   const sp = useSearchParams();
@@ -62,7 +62,21 @@ export default function ReplayClient() {
   }
 
   const firstYear = Number(series.first.slice(0, 4));
-  const effYear = Math.max(firstYear, Math.min(new Date().getFullYear() - 1, year));
+  let effYear = Math.max(firstYear, Math.min(new Date().getFullYear() - 1, year));
+  // 数据陈旧时请求年份可能没有任何交易日 → 逐级回退到数据存在的年份
+  if (startIndexForYear(series, effYear) < 0) {
+    const lastDataYear = Number(series.last.slice(0, 4));
+    effYear = startIndexForYear(series, lastDataYear) >= 0 ? lastDataYear : firstYear;
+  }
 
-  return <ReplayExperience series={series} stock={stock} year={effYear} amount={amount} meme={meme} />;
+  return (
+    <ReplayExperience
+      key={`${key}-${effYear}-${amount}`}
+      series={series}
+      stock={stock}
+      year={effYear}
+      amount={amount}
+      meme={meme}
+    />
+  );
 }

@@ -44,16 +44,22 @@ export interface Series {
   fetchedAt: string;
 }
 
-/** 构建期读取 public/data/{key}.json (仅服务端调用) */
+const seriesCache = new Map<string, Series | null>();
+
+/** 构建期读取 public/data/{key}.json (仅服务端调用; 同一文件只读一次) */
 export async function loadSeries(key: string): Promise<Series | null> {
+  if (seriesCache.has(key)) return seriesCache.get(key)!;
+  let out: Series | null = null;
   try {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const file = path.join(process.cwd(), 'public', 'data', `${key}.json`);
-    return JSON.parse(await fs.readFile(file, 'utf8')) as Series;
+    out = JSON.parse(await fs.readFile(file, 'utf8')) as Series;
   } catch {
-    return null;
+    out = null;
   }
+  seriesCache.set(key, out);
+  return out;
 }
 
 /** 起始年份选项: IPO/数据首年 .. 当前年-1 */
