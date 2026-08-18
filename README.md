@@ -45,7 +45,7 @@ node scripts/fetch-data.mjs msft btc # 指定标的
 
 1. `npm run build` → 部署 `out/`
 2. DNS 增加 CNAME：`whatif.axtrivc.com` → 托管地址
-3. 新 URL 可提交 IndexNow（复用 ToolHub 的 `scripts/submit-urls.mjs` 思路）
+3. 新 URL 可提交 IndexNow：`node scripts/submit-urls.mjs`（密钥文件 `public/<key>.txt`，换密钥时与脚本内常量同步更新）
 
 ## 口径与合规
 
