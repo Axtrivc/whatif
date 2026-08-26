@@ -1,0 +1,110 @@
+/**
+ * 回放视频导出 — WebCodecs H.264 + mp4-muxer
+ *
+ * 离屏 canvas 逐帧调 renderFrame(与页面预览同一渲染路径), 硬件编码 H.264,
+ * mp4-muxer 封装 → 1280×720 MP4 下载。帧率无关(逐帧确定性渲染, 非屏幕录制)。
+ *
+ * 时长策略: 回放动画本身 45-240s, 直接 1:1 导出太长; 按目标 ≤45s 视频等比
+ * 提高时间倍率(采样同一条渲染曲线, 只是 t 推进更快)。
+ * 降级: VideoEncoder 不可用(旧浏览器/Firefox)时调用方隐藏入口。
+ */
+import { ArrayBufferTarget, Muxer } from 'mp4-muxer';
+import { durationFor, type ReplayInput } from '@/lib/engine';
+import { renderFrame, type SmoothState } from '@/components/replay-render';
+import type { Locale } from '@/lib/i18n';
+
+export function videoExportSupported(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    'VideoEncoder' in window &&
+    'VideoFrame' in window &&
+    typeof document !== 'undefined'
+  );
+}
+
+const VW = 1280;
+const VH = 720;
+const FPS = 30;
+const TARGET_SEC = 45; // 视频目标时长上限
+const MIN_SEC = 12; // 太短的回放不加速, 保底时长
+
+interface ExportOpts {
+  input: ReplayInput;
+  locale: Locale;
+  compareSeries?: Float64Array;
+  onProgress?: (p: number) => void; // 0..1
+  signal?: AbortSignal;
+}
+
+/** 导出回放 MP4, 完成 resolve 下载 Blob */
+export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
+  const { input, locale, compareSeries, onProgress, signal } = opts;
+
+  const animSec = durationFor(input.end - input.start);
+  const speed = Math.max(1, animSec / Math.max(MIN_SEC, Math.min(TARGET_SEC, animSec)));
+  const outSec = animSec / speed;
+  const totalFrames = Math.ceil(outSec * FPS);
+
+  const cv = document.createElement('canvas');
+  cv.width = VW;
+  cv.height = VH;
+  const ctx = cv.getContext('2d', { alpha: false })!;
+  const smooth: SmoothState = {};
+
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: 'avc', width: VW, height: VH },
+    fastStart: 'in-memory',
+  });
+
+  const enc = new (window as any).VideoEncoder({
+    output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
+    error: (e: Error) => {
+      throw e;
+    },
+  });
+  enc.configure({
+    codec: 'avc1.640028', // High Profile L4.0 — 1080p30 常规档
+    width: VW,
+    height: VH,
+    bitrate: 4_500_000,
+    framerate: FPS,
+  });
+
+  const usPerFrame = 1e6 / FPS;
+  for (let f = 0; f < totalFrames; f++) {
+    if (signal?.aborted) {
+      enc.close();
+      throw new DOMException('aborted', 'AbortError');
+    }
+    const t = Math.min(1, (f * speed) / (animSec * FPS));
+    renderFrame(ctx, {
+      w: VW,
+      h: VH,
+      dpr: 1,
+      t,
+      ts: performance.now(),
+      input,
+      smooth,
+      watermark: 'whatif.axtrivc.com',
+      locale,
+      compareSeries,
+    });
+    const frame = new (window as any).VideoFrame(cv, {
+      timestamp: Math.round(f * usPerFrame),
+      duration: Math.round(usPerFrame),
+    });
+    enc.encode(frame, { keyFrame: f % (FPS * 2) === 0 });
+    frame.close();
+    if (f % 6 === 0) {
+      onProgress?.(f / totalFrames);
+      await new Promise((r) => setTimeout(r, 0)); // 让出主线程, 保 UI 可响应
+    }
+  }
+  onProgress?.(1);
+  await enc.flush();
+  enc.close();
+  muxer.finalize();
+  const { buffer } = muxer.target as ArrayBufferTarget;
+  return new Blob([buffer], { type: 'video/mp4' });
+}
