@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import HtmlLang from '@/components/HtmlLang';
 import './globals.css';
 
 export const SITE = 'whatif.axtrivc.com';
@@ -39,7 +40,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body className="min-h-dvh bg-ink-950 text-white antialiased">{children}</body>
+      <body className="min-h-dvh bg-ink-950 text-white antialiased">
+        <HtmlLang />
+        {children}
+      </body>
     </html>
   );
 }

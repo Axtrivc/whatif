@@ -4,7 +4,7 @@ export const dynamic = 'force-static';
 
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: [{ userAgent: '*', allow: '/', disallow: '/replay/' }],
+    rules: [{ userAgent: '*', allow: '/', disallow: ['/replay/', '/en/replay/'] }],
     sitemap: 'https://whatif.axtrivc.com/sitemap.xml',
   };
 }

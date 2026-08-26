@@ -16,7 +16,7 @@ export default function ReplayPage() {
         </div>
       }
     >
-      <ReplayClient />
+      <ReplayClient locale="zh" />
     </Suspense>
   );
 }

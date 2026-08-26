@@ -35,8 +35,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     const last = manifest[s.key]?.last;
     return last ? ymdToDate(last) : new Date();
   });
-  const homeLast = entryDates.reduce((acc, d) => (d > acc ? d : acc), new Date(0));
+  const homeLast = entryDates.reduce((acc, d) => (d > acc ? d : new Date(0)), new Date(0));
   return [
+    // 中文(默认)
     {
       url: `${base}/`,
       lastModified: homeLast,
@@ -48,6 +49,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: entryDates[i],
       changeFrequency: 'weekly' as const,
       priority: 0.8,
+    })),
+    // 英文镜像(/en)
+    {
+      url: `${base}/en/`,
+      lastModified: homeLast,
+      changeFrequency: 'daily',
+      priority: 0.9,
+    },
+    ...STOCKS.map((s, i) => ({
+      url: `${base}/en/p/${s.key}/`,
+      lastModified: entryDates[i],
+      changeFrequency: 'weekly' as const,
+      priority: 0.7,
     })),
   ];
 }
