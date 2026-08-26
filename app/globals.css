@@ -6,17 +6,17 @@
   color-scheme: dark;
 }
 
-/* 键盘可达性: 统一 focus 可见样式 */
+/* 键盘可达性: 统一 focus 可见样式(白, 极简) */
 :focus-visible {
-  outline: 2px solid rgba(255, 90, 90, 0.8);
+  outline: 2px solid rgba(255, 255, 255, 0.6);
   outline-offset: 2px;
 }
 
 ::selection {
-  background: rgba(255, 59, 48, 0.35);
+  background: rgba(255, 255, 255, 0.2);
 }
 
-/* 进度条(range) */
+/* 进度条(range): 细轨 + 白色圆点 thumb */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
@@ -28,8 +28,7 @@ input[type='range']::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
   border-radius: 9999px;
-  background: #ff3b30;
-  box-shadow: 0 0 10px rgba(255, 59, 48, 0.6);
+  background: #ffffff;
   cursor: pointer;
 }
 input[type='range']::-moz-range-thumb {
@@ -37,43 +36,30 @@ input[type='range']::-moz-range-thumb {
   height: 14px;
   border: none;
   border-radius: 9999px;
-  background: #ff3b30;
+  background: #ffffff;
   cursor: pointer;
 }
 
-@keyframes pulse-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 60px -18px rgba(255, 59, 48, 0.5);
-  }
-  50% {
-    box-shadow: 0 0 90px -12px rgba(255, 59, 48, 0.75);
-  }
-}
-
-/* 终局战报卡: 弹簧放大弹出(过冲) */
+/* 终局战报卡: 淡入上移(无弹簧过冲, 极简) */
 @keyframes wi-pop {
-  0% {
-    transform: scale(0.6);
+  from {
     opacity: 0;
+    transform: translateY(12px);
   }
-  60% {
-    transform: scale(1.05);
+  to {
     opacity: 1;
-  }
-  100% {
-    transform: scale(1);
+    transform: none;
   }
 }
 .wi-pop {
-  animation: wi-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: wi-pop 0.35s ease-out both;
 }
 
-/* 操作按钮组: 逐个优雅浮现 */
+/* 操作按钮组: 逐个浮现 */
 @keyframes wi-rise {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -100,43 +86,8 @@ input[type='range']::-moz-range-thumb {
   animation-play-state: paused;
 }
 
-/* 舞台边框流光: 盈亏双色 conic 渐变旋转 */
-@keyframes wi-borderflow {
-  to {
-    --wi-angle: 360deg;
-  }
-}
-@property --wi-angle {
-  syntax: '<angle>';
-  initial-value: 0deg;
-  inherits: false;
-}
-.wi-stage-flow {
-  position: relative;
-}
-.wi-stage-flow::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  padding: 1px;
-  background: conic-gradient(
-    from var(--wi-angle),
-    rgba(255, 77, 79, 0.65),
-    rgba(0, 245, 212, 0.45),
-    rgba(255, 77, 79, 0.05),
-    rgba(255, 77, 79, 0.65)
-  );
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: wi-borderflow 6s linear infinite;
-  pointer-events: none;
-}
-
-/* prefers-reduced-motion: 关闭边框流光/走马灯/结算卡弹入动画 */
+/* prefers-reduced-motion: 关闭走马灯/浮现动画 */
 @media (prefers-reduced-motion: reduce) {
-  .wi-stage-flow::before,
   .wi-marquee,
   .wi-pop,
   .wi-rise {
