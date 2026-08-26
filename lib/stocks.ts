@@ -62,15 +62,6 @@ export async function loadSeries(key: string): Promise<Series | null> {
   return out;
 }
 
-/** 起始年份选项: IPO/数据首年 .. 当前年-1 */
-export function yearOptions(series: Series): number[] {
-  const firstYear = Number(series.first.slice(0, 4));
-  const lastYear = new Date().getFullYear() - 1;
-  const years: number[] = [];
-  for (let y = lastYear; y >= firstYear; y--) years.push(y);
-  return years;
-}
-
 /** 该年份首个交易日索引(>= YYYY0101 的第一天) */
 export function startIndexForYear(series: Series, year: number): number {
   const prefix = String(year);
@@ -79,11 +70,3 @@ export function startIndexForYear(series: Series, year: number): number {
   }
   return -1;
 }
-
-export const MARKET_LABEL: Record<StockMeta['market'], string> = {
-  nasdaq: '纳斯达克',
-  nyse: '纽交所',
-  index: '指数',
-  gold: '商品',
-  crypto: '加密货币',
-};

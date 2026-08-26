@@ -14,6 +14,18 @@
 - **渲染引擎**：`components/replay-render.ts` 的 `renderFrame(ctx, t)` 纯函数
   - 预览与未来的逐帧视频导出（WebCodecs + H.264 MP4）共用同一渲染路径
 - **分享**：v1 生成 1080×1350 PNG 分享图 + 复制链接（支持 `navigator.share` 文件分享）
+- **视频导出**：结算卡「导出视频」— WebCodecs H.264 硬编码 + mp4-muxer 封装，
+  1280×720/30fps MP4，长回放按 ≤45s 目标等比加速采样；`renderFrame` 纯函数逐帧渲染
+  （与预览同一路径），不支持 WebCodecs 的浏览器自动隐藏入口（`lib/video-export.ts`）
+- **定投模式（DCA）**：回放 URL 加 `m=dca&monthly=1000` 启用，份额法逐日计算
+  - 引擎：`lib/engine.ts` 的 `dcaSeries`/`dcaInvested`；收益率/回撤相对**累计投入**
+  - 主页预设卡每个案例带定投变体；落地页有「定投 vs 一次性买入」对比表（构建期真算）
+  - 梗文案参数为 `mtext`（旧 `m=` 仅非 `dca` 值时生效）
+- **多语言**：中文默认（根路径 `/`），英文镜像挂 `/en/` 前缀
+  - 文案字典在 `lib/i18n.ts`（`Dict` 类型保证中英键一一对应）
+  - 页面正文组件（`HomeContent` / `StockLandingContent`）中英共用，按 `locale` 渲染
+  - `<link rel="alternate" hreflang>` 由各页 metadata 的 `alternates.languages` 生成
+  - 新增语言：`lib/i18n.ts` 加字典 + 新建对应路由目录即可（回放页为纯客户端组件）
 
 ## 开发
 
@@ -38,6 +50,7 @@ node scripts/fetch-data.mjs msft btc # 指定标的
 
 标的目录在 `lib/stocks.ts` 的 `STOCKS`、`scripts/fetch-data.mjs` 的 `CATALOG`/`TICKER_ORDER` 中同步维护。
 新增标的：两处各加一行 → 跑 fetch-data → 落地页/站点地图自动生成。
+注意：`lib/i18n.ts` 的 `TAGLINE_EN` 需同步补该标的的英文一句话简介（缺省回退英文名）。
 
 ## 部署
 

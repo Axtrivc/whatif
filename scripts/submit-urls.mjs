@@ -1,8 +1,8 @@
 /**
  * WhatIf — IndexNow 批量提交(Bing/Yandex 收录加速)
  *
- * 提交首页 + 全部标的落地页(/p/<key>/)。URL 列表从 lib/stocks.ts 解析,
- * 新增标的后重跑本脚本即可。密钥文件 public/<key>.txt 需已部署到站点根目录。
+ * 提交中英双语全部页面: 首页 + 全部标的落地页(/p/<key>/ 与 /en/p/<key>/)。
+ * URL 列表从 lib/stocks.ts 解析, 新增标的后重跑本脚本即可。密钥文件 public/<key>.txt 需已部署到站点根目录。
  *
  * 用法:
  *   node scripts/submit-urls.mjs              # 提交
@@ -45,7 +45,11 @@ async function submit(urls, endpoint) {
   return res.status;
 }
 
-const urls = [`${SITE_URL}/`, ...stockKeys().map((k) => `${SITE_URL}/p/${k}/`)];
+const urls = [
+  `${SITE_URL}/`,
+  `${SITE_URL}/en/`,
+  ...stockKeys().flatMap((k) => [`${SITE_URL}/p/${k}/`, `${SITE_URL}/en/p/${k}/`]),
+];
 
 console.log(`WhatIf IndexNow — ${urls.length} 个 URL → ${SITE_URL}`);
 if (!existsSync(join(ROOT, 'public', `${KEY}.txt`))) {

@@ -63,6 +63,18 @@ export function usdPrice(v: number | null | undefined): string {
   return `$${v.toFixed(2)}`;
 }
 
+/** 带符号盈亏(英文缩写): +$1.23M / -$918.3K */
+export function profitEn(v: number): string {
+  const sign = v >= 0 ? '+' : '-';
+  return `${sign}${moneyEn(Math.abs(v))}`;
+}
+
+/** 按语言选择金额格式 */
 export function money(amount: number, locale: 'zh' | 'en'): string {
   return locale === 'zh' ? moneyZh(amount) : moneyEn(amount);
+}
+
+/** 按语言选择带符号盈亏格式 */
+export function profit(amount: number, locale: 'zh' | 'en'): string {
+  return locale === 'zh' ? profitZh(amount) : profitEn(amount);
 }
