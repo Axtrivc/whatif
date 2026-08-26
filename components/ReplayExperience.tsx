@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { computeStats, durationFor, type ReplayInput } from '@/lib/engine';
-import { moneyZh, pct, profitZh, usdPrice } from '@/lib/format';
+import { computeStats, dcaInvested, dcaSeries, durationFor, type ReplayInput } from '@/lib/engine';
+import { dateYM, money, pct, profit, usdPrice } from '@/lib/format';
+import { dict, TAGLINE_EN, type Locale } from '@/lib/i18n';
 import { startIndexForYear, type Series, type StockMeta } from '@/lib/stocks';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
 import { buildShareImage } from '@/components/ShareCard';
+import { exportReplayVideo, videoExportSupported } from '@/lib/video-export';
 import TickerTape from '@/components/TickerTape';
 
 interface Props {
@@ -15,6 +17,10 @@ interface Props {
   year: number;
   amount: number;
   meme?: string; // 副标题梗(可选), 缺省为模式说明
+  monthly?: number; // 每月定投额(缺省=一次性买入)
+  compare?: boolean; // 定投页叠加一次性买入对比曲线
+  locale?: Locale;
+  homeHref?: string;
 }
 
 const SPEEDS = [1, 2, 4] as const;
@@ -46,11 +52,22 @@ function CountUp({
   return <>{text}</>;
 }
 
-export default function ReplayExperience({ series, stock, year, amount, meme }: Props) {
+export default function ReplayExperience({
+  series,
+  stock,
+  year,
+  amount,
+  meme,
+  monthly,
+  compare = false,
+  locale = 'zh',
+  homeHref = '/',
+}: Props) {
+  const t = dict(locale);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const scrubRef = useRef<HTMLInputElement>(null);
-  const pctRef = useRef<HTMLSpanElement>(null);
+  const pctRef = useRef<HTMLDivElement>(null);
   const plRef = useRef<HTMLSpanElement>(null);
   const dateRef = useRef<HTMLSpanElement>(null);
   const priceRef = useRef<HTMLSpanElement>(null);
@@ -68,6 +85,8 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
   const [done, setDone] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [videoPct, setVideoPct] = useState<number | null>(null); // null=空闲, 0-100=导出中
+  const videoSupported = useMemo(() => videoExportSupported(), []);
 
   const input = useMemo<ReplayInput>(() => {
     const start = startIndexForYear(series, year);
@@ -77,18 +96,36 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
       start,
       end: series.points - 1,
       amount,
+      monthly,
     };
-  }, [series, year, amount]);
+  }, [series, year, amount, monthly]);
 
   const duration = useMemo(() => durationFor(input.end - input.start), [input]);
   const stats = useMemo(() => (done ? computeStats(input) : null), [done, input]);
+  // 对比曲线: 同参数一次性买入(总投入=定投累计投入), useMemo 稳定引用供 WeakMap 缓存
+  const compareSeries = useMemo(() => {
+    if (!compare || !monthly) return undefined;
+    const invested = dcaInvested(input);
+    return dcaSeries({ ...input, amount: invested, monthly: undefined });
+  }, [compare, monthly, input]);
+  // 对比口径的一次性买入终值(结算卡展示)
+  const lumpFinal = useMemo(() => {
+    if (!compare || !monthly) return null;
+    const invested = dcaInvested(input);
+    const lumpInput = { ...input, amount: invested, monthly: undefined };
+    return computeStats(lumpInput).finalValue;
+  }, [compare, monthly, input]);
   // prefers-reduced-motion: 关脉冲/闪光/CSS 动画, 自动播放直跳终点
   const reduced = useMemo(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     []
   );
-  const amountLabel = moneyZh(amount);
-  const title = `假如你在 ${year}年 买入 ${amountLabel} ${stock.zh}`;
+  const amountLabel = money(amount, locale);
+  const monthlyLabel = monthly ? money(monthly, locale) : '';
+  const stockName = locale === 'zh' ? stock.zh : stock.en;
+  const title = monthly
+    ? t.titleBuyDca(year, amountLabel, monthlyLabel, stockName)
+    : t.titleBuyIn(year, amountLabel, stockName);
 
   // ── 每帧: 画 canvas + 直写 DOM 指标(ref 直写绕过 React 重渲染, 保 60fps) ──
   const draw = useCallback(
@@ -117,32 +154,59 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
         smooth: smoothRef.current,
         watermark: 'whatif.axtrivc.com',
         reduced,
+        locale,
+        compareSeries,
       });
 
       // 右上角战报 + 底部价格直写
       const i0 = input.start;
       const i = Math.min(input.end, i0 + Math.floor(tt * (input.end - i0 + 1)));
-      const value = (amount * input.closes[i]) / input.closes[i0];
-      const gain = value - amount;
+      // DCA 模式: 资产与累计投入都从份额法序列取; lump-sum 用比值法
+      let value: number;
+      let putIn: number;
+      if (input.monthly) {
+        const s = dcaSeries(input);
+        value = s[Math.min(i, input.end) - i0];
+        // 截至第 i 天的注入笔数(首笔 + 月度)
+        let months = 0;
+        let lastM = -1;
+        for (let j = i0; j <= i; j++) {
+          const d = series.dates[j];
+          const m = +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
+          if (lastM < m) {
+            lastM = m;
+            months++;
+          }
+        }
+        putIn = amount + (input.monthly ?? 0) * (months - 1);
+      } else {
+        value = (amount * input.closes[i]) / input.closes[i0];
+        putIn = amount;
+      }
+      const gain = value - putIn;
       const upNow = gain >= 0;
       if (pctRef.current) {
-        pctRef.current.textContent = pct(gain / amount);
+        pctRef.current.textContent = pct(gain / putIn);
         pctRef.current.style.color = upNow ? UP : DOWN;
         pctRef.current.style.textShadow = `0 0 26px ${upNow ? UP : DOWN}66`;
       }
-      if (plRef.current) plRef.current.textContent = profitZh(gain);
+      if (plRef.current) {
+        plRef.current.textContent = input.monthly
+          ? `${profit(gain, locale)} / ${money(putIn, locale)}`
+          : profit(gain, locale);
+      }
       if (plRef.current) plRef.current.style.color = upNow ? UP : DOWN;
-      if (dateRef.current) dateRef.current.textContent = `${series.dates[i].slice(0, 4)}-${series.dates[i].slice(4, 6)}`;
+      if (dateRef.current) dateRef.current.textContent = dateYM(series.dates[i]);
       if (priceRef.current) {
         const buy = series.rawCloses?.[i0] ?? null;
         const cur = series.rawCloses?.[i] ?? null;
-        priceRef.current.textContent = `买入价 ${usdPrice(buy)} · 当前收盘 ${usdPrice(cur)}`;
+        priceRef.current.textContent = t.buyPriceNowPrice(usdPrice(buy), usdPrice(cur));
       }
       if (scrubRef.current && document.activeElement !== scrubRef.current) {
         scrubRef.current.value = String(tt);
       }
     },
-    [input, series, reduced]
+    [input, series, reduced, locale, t, compareSeries]
   );
 
   useEffect(() => {
@@ -163,14 +227,33 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
     const paceMod = (p: number) => 0.3 + 0.7 * Math.min(ss(p / 0.045), ss((1 - p) / 0.07));
     const tick = (ts: number) => {
       if (startTsRef.current == null) startTsRef.current = ts;
-      const dt = ((ts - startTsRef.current) / 1000) * speed * paceMod(accRef.current / duration);
+      // 切后台回来首帧 delta 会是整段隐藏时长, 限幅防内容时间一次性跳变
+      const rawMs = Math.min(ts - startTsRef.current, 100);
       startTsRef.current = ts;
+      const dt = (rawMs / 1000) * speed * paceMod(accRef.current / duration);
       accRef.current = Math.min(duration, accRef.current + dt);
       const nt = accRef.current / duration;
       tRef.current = nt;
-      // 里程碑检测(回本 / 首破整数倍) → 渲染层闪光
+      // 里程碑检测(回本 / 首破整数倍) → 渲染层闪光; DCA 相对累计投入
       const i = Math.min(input.end, input.start + Math.floor(nt * (input.end - input.start + 1)));
-      const m = input.closes[i] / input.closes[input.start];
+      let m: number;
+      if (input.monthly) {
+        const s = dcaSeries(input);
+        let months = 0;
+        let lastM = -1;
+        for (let j = input.start; j <= i; j++) {
+          const d = series.dates[j];
+          const mm = +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
+          if (lastM < mm) {
+            lastM = mm;
+            months++;
+          }
+        }
+        const put = amount + (input.monthly ?? 0) * (months - 1);
+        m = s[i - input.start] / put;
+      } else {
+        m = input.closes[i] / input.closes[input.start];
+      }
       if (m < 1) {
         underRef.current = true;
       } else if (underRef.current) {
@@ -209,7 +292,8 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
     underRef.current = false;
     setDone(false);
     setPlaying(true);
-  }, []);
+    draw(0); // 立即回到起点帧, 不等下一个 rAF(避免残留终局画面一闪)
+  }, [draw]);
 
   const scrub = useCallback(
     (v: number) => {
@@ -244,6 +328,8 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
       )
         return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // 空格/R 长按连发会造成播放状态抖动, 只放行方向键的重复
+      if (e.repeat && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       if (e.key === ' ') {
         e.preventDefault();
         if (tRef.current >= 1) restart();
@@ -264,8 +350,8 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
     if (!stats) return;
     setShareBusy(true);
     try {
-      const blob = await buildShareImage({ stock, input, stats, rawCloses: series.rawCloses });
-      const file = new File([blob], `whatif-${stock.key}-${year}.png`, { type: 'image/png' });
+      const blob = await buildShareImage({ stock, input, stats, rawCloses: series.rawCloses, locale });
+      const file = new File([blob], `whatif-${stock.key}-${year}${monthly ? '-dca' : ''}.png`, { type: 'image/png' });
       const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
       if (nav.canShare?.({ files: [file] })) {
         await navigator.share({ files: [file], title } as ShareData);
@@ -277,13 +363,17 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
         a.click();
         URL.revokeObjectURL(url);
       }
+    } catch {
+      /* 海报生成/分享失败静默, 按钮恢复可用即可 */
     } finally {
       setShareBusy(false);
     }
   };
 
   const shareLink = async () => {
-    const url = `${location.origin}/replay/?s=${stock.key}&y=${year}&a=${amount}`;
+    const base = locale === 'en' ? '/en/replay/' : '/replay/';
+    const dcaQ = monthly ? `&m=dca&monthly=${monthly}${compare ? '&compare=1' : ''}` : '';
+    const url = `${location.origin}${base}?s=${stock.key}&y=${year}&a=${amount}${dcaQ}`;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -293,49 +383,102 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
     }
   };
 
+  const exportVideo = async () => {
+    if (!stats || videoPct != null) return;
+    setVideoPct(0);
+    try {
+      const blob = await exportReplayVideo({
+        input,
+        locale,
+        compareSeries,
+        onProgress: (p) => setVideoPct(Math.round(p * 100)),
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `whatif-${stock.key}-${year}${monthly ? '-dca' : ''}.mp4`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch {
+      /* 编码失败静默恢复按钮 */
+    } finally {
+      setVideoPct(null);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-5">
       {/* ════════ 顶部状态栏: 左(返回+本金) / 中(大标题+梗) / 右(战报区) ════════ */}
       <header className="grid grid-cols-[minmax(90px,auto)_1fr_minmax(150px,auto)] items-start gap-3 pb-4">
         <div className="flex flex-col gap-1.5 pt-1">
           <Link
-            href="/"
+            href={homeHref}
             className="inline-flex items-center gap-1 text-xs text-white/50 transition hover:text-white"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M10 3 5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            返回
+            {t.back}
           </Link>
-          <span className="font-mono text-xs font-semibold text-white/55">{amountLabel} 本金</span>
+          <span className="font-mono text-xs font-semibold text-white/55">
+            {monthly
+              ? locale === 'zh'
+                ? `${amountLabel} + 每月 ${monthlyLabel}`
+                : `${amountLabel} + ${monthlyLabel}/mo`
+              : t.principal(amountLabel)}
+          </span>
         </div>
 
         <div className="min-w-0 text-center">
           <h1 className="truncate text-xl font-black leading-snug tracking-tight sm:text-3xl">
-            假如你在 {year}年 买入 {amountLabel}{' '}
-            <span style={{ color: UP, textShadow: `0 0 24px ${UP}59` }}>{stock.zh}</span>
+            {locale === 'zh' ? (
+              monthly ? (
+                <>
+                  假如你在 {year}年 买入 {amountLabel}{' '}
+                  <span className="text-white/45" style={{}}>{stock.zh}</span>
+                  ，每月再投 {monthlyLabel}
+                </>
+              ) : (
+                <>
+                  假如你在 {year}年 买入 {amountLabel}{' '}
+                  <span className="text-white/45" style={{}}>{stock.zh}</span>
+                </>
+              )
+            ) : monthly ? (
+              <>
+                {amountLabel} of{' '}
+                <span className="text-white/45" style={{}}>{stock.en}</span> in{' '}
+                {year}, plus {monthlyLabel}/mo
+              </>
+            ) : (
+              <>
+                If you bought {amountLabel} of{' '}
+                <span className="text-white/45" style={{}}>{stock.en}</span> in{' '}
+                {year}
+              </>
+            )}
           </h1>
           <p className="mt-1 truncate text-sm font-semibold text-white/55">
-            {meme || '一直持有 · 红利复投'}
+            {meme || (monthly ? t.dcaSubtitle : t.holdForever)}
           </p>
         </div>
 
         <div className="pt-0.5 text-right">
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/35">
-            收益率
+            {t.returnRate}
           </div>
           <div
-            ref={pctRef as React.RefObject<HTMLDivElement>}
+            ref={pctRef}
             className="text-4xl font-black leading-none tracking-tight tabular-nums sm:text-5xl"
-            style={{ color: UP, textShadow: `0 0 26px ${UP}66` }}
+            style={{ color: UP }}
           >
             +0.00%
           </div>
           <div className="mt-0.5 flex items-baseline justify-end gap-2 font-mono text-xs">
-            <span ref={plRef as React.RefObject<HTMLSpanElement>} className="tabular-nums">
+            <span ref={plRef} className="tabular-nums">
               +0万
             </span>
-            <span ref={dateRef as React.RefObject<HTMLSpanElement>} className="text-white/40 tabular-nums">
+            <span ref={dateRef} className="text-white/40 tabular-nums">
               {series.dates[input.start].slice(0, 4)}-
               {series.dates[input.start].slice(4, 6)}
             </span>
@@ -346,21 +489,18 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
       {/* ════════ 电影感图表舞台(宽幅 + 盈亏双色流光边框) ════════ */}
       <div
         ref={boxRef}
-        className="wi-stage-flow relative aspect-[16/9] w-full overflow-hidden rounded-2xl border border-white/10 shadow-[0_0_80px_-24px_rgba(255,76,108,0.35)] sm:aspect-[2.2/1]"
-        style={{
-          background:
-            'radial-gradient(130% 105% at 50% 0%, #151c33 0%, #0c1122 55%, #070a14 100%)',
-        }}
+        className="relative aspect-[16/9] w-full overflow-hidden rounded-xl border border-white/10 sm:aspect-[2.2/1]"
+        style={{ background: '#0c0c0f' }}
       >
         <canvas
           ref={canvasRef}
           className="block h-full w-full"
           role="img"
-          aria-label={`${stock.zh} ${year} 年买入后逐日持有的资产曲线动画`}
+          aria-label={t.canvasAria(stockName, year)}
         />
         <button
           type="button"
-          aria-label={playing ? '暂停' : '播放'}
+          aria-label={playing ? t.pause : t.play}
           className="absolute inset-0 h-full w-full cursor-pointer"
           onClick={() => {
             if (tRef.current >= 1) restart();
@@ -373,59 +513,82 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
             <div className="wi-pop w-full max-w-md rounded-3xl border border-white/12 bg-ink-900/95 p-7 text-center shadow-2xl">
               <div className="mx-auto inline-flex rounded-full border border-white/15 px-4 py-1 font-mono text-[11px] uppercase tracking-[0.25em] text-white/50">
-                最终收益率
+                {t.finalReturn}
               </div>
               <div
                 className="mt-4 font-mono text-6xl font-black tabular-nums sm:text-7xl"
-                style={{
-                  color: stats.returnPct >= 0 ? UP : DOWN,
-                  textShadow: `0 0 34px ${stats.returnPct >= 0 ? UP : DOWN}66`,
-                }}
+                style={{ color: stats.returnPct >= 0 ? UP : DOWN }}
               >
                 <CountUp target={stats.returnPct} format={pct} />
               </div>
               <p className="mt-3 text-sm text-white/60">
-                最终剩余资产{' '}
+                {t.finalAssets}{' '}
                 <span className="font-bold text-white">
-                  <CountUp target={stats.finalValue} format={moneyZh} duration={1300} />
+                  <CountUp target={stats.finalValue} format={(v) => money(v, locale)} duration={1300} />
                 </span>
-                （{stats.profit >= 0 ? '盈利' : '亏损'}{' '}
+                （{stats.profit >= 0 ? t.profit : t.loss}{' '}
                 <span
                   className="font-bold"
                   style={{ color: stats.profit >= 0 ? UP : DOWN }}
                 >
-                  {profitZh(stats.profit)}
+                  {profit(stats.profit, locale)}
                 </span>
                 ）
               </p>
+              {stats.invested != null && (
+                <p className="mt-1 text-xs text-white/50">
+                  {t.invested} {money(stats.invested, locale)}
+                  {lumpFinal != null && (
+                    <>
+                      {' · '}
+                      {locale === 'zh' ? '同期一次性' : 'Lump sum'}{' '}
+                      <span className="font-mono">{money(lumpFinal, locale)}</span>
+                    </>
+                  )}
+                </p>
+              )}
               <p className="mt-1 font-mono text-[11px] text-white/40">
-                {stats.years.toFixed(1)} 年 · 年化 {(stats.cagr * 100).toFixed(1)}% · 最大回撤{' '}
-                {(stats.maxDrawdown * 100).toFixed(0)}%
+                {t.statsLine(
+                  Number(stats.years.toFixed(1)),
+                  Number((stats.cagr * 100).toFixed(1)),
+                  Number((stats.maxDrawdown * 100).toFixed(0))
+                )}
               </p>
-              <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+              <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-1.5">
                 <button
                   type="button"
                   onClick={shareImage}
                   disabled={shareBusy}
-                  className="wi-rise flex-1 rounded-xl bg-up py-2.5 text-sm font-bold text-white shadow-[0_6px_20px_-6px_rgba(255,77,79,0.6)] transition active:scale-95 disabled:opacity-50"
+                  className="wi-rise whitespace-nowrap rounded-xl bg-white px-2 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-white/90 active:scale-95 disabled:opacity-50"
                 >
-                  {shareBusy ? '生成中…' : '生成分享海报'}
+                  {shareBusy ? t.generating : t.genPoster}
                 </button>
+                {videoSupported && (
+                  <button
+                    type="button"
+                    onClick={exportVideo}
+                    disabled={videoPct != null}
+                    className="wi-rise whitespace-nowrap rounded-xl border border-white/15 px-2 py-2.5 text-sm font-semibold text-white/80 transition hover:border-white/30 active:scale-95 disabled:opacity-50"
+                    style={{ animationDelay: '60ms' }}
+                  >
+                    {videoPct != null ? t.exporting(videoPct) : t.exportVideo}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={shareLink}
-                  className="wi-rise flex-1 rounded-xl border border-white/15 py-2.5 text-sm font-semibold text-white/80 transition hover:border-white/30 active:scale-95"
-                  style={{ animationDelay: '80ms' }}
+                  className="wi-rise whitespace-nowrap rounded-xl border border-white/15 px-2 py-2.5 text-sm font-semibold text-white/80 transition hover:border-white/30 active:scale-95"
+                  style={{ animationDelay: '120ms' }}
                 >
-                  {copied ? '已复制 ✓' : '复制战报链接'}
+                  {copied ? t.copied : t.copyLink}
                 </button>
                 <button
                   type="button"
                   onClick={restart}
-                  className="wi-rise flex-1 rounded-xl border border-white/15 py-2.5 text-sm font-semibold text-white/80 transition hover:border-white/30 active:scale-95"
-                  style={{ animationDelay: '160ms' }}
+                  className="wi-rise whitespace-nowrap rounded-xl border border-white/15 px-2 py-2.5 text-sm font-semibold text-white/80 transition hover:border-white/30 active:scale-95"
+                  style={{ animationDelay: '180ms' }}
                 >
-                  再测一次
+                  {t.replayAgain}
                 </button>
               </div>
             </div>
@@ -438,11 +601,12 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
 
       {/* ════════ 底部状态信息 ════════ */}
       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-        <span className="text-white/35">历史数据模拟，仅供娱乐与复盘</span>
-        <span ref={priceRef as React.RefObject<HTMLSpanElement>} className="font-mono text-white/35 tabular-nums">
-          {`买入价 ${usdPrice(series.rawCloses?.[input.start] ?? null)} · 当前收盘 ${usdPrice(
-            series.rawCloses?.[input.start] ?? null
-          )}`}
+        <span className="text-white/35">{t.simNote}</span>
+        <span ref={priceRef} className="font-mono text-white/35 tabular-nums">
+          {t.buyPriceNowPrice(
+            usdPrice(series.rawCloses?.[input.start] ?? null),
+            usdPrice(series.rawCloses?.[input.start] ?? null)
+          )}
         </span>
       </div>
 
@@ -452,7 +616,7 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
           type="button"
           onClick={() => (tRef.current >= 1 ? restart() : setPlaying((p) => !p))}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
-          aria-label={playing ? '暂停' : '播放'}
+          aria-label={playing ? t.pause : t.play}
         >
           {tRef.current >= 1 || !playing ? (
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -474,9 +638,9 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
           defaultValue={0}
           onChange={(e) => scrub(Number(e.target.value))}
           className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/15"
-          aria-label="进度"
+          aria-label={t.progressAria}
         />
-        <div className="flex shrink-0 overflow-hidden rounded-full border border-white/15" role="group" aria-label="播放速度">
+        <div className="flex shrink-0 overflow-hidden rounded-full border border-white/15" role="group" aria-label={t.speedGroup}>
           {SPEEDS.map((s) => (
             <button
               key={s}
@@ -495,7 +659,7 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
           type="button"
           onClick={restart}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
-          aria-label="重播"
+          aria-label={t.replayBtn}
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
             <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" strokeLinecap="round" />
@@ -503,9 +667,7 @@ export default function ReplayExperience({ series, stock, year, amount, meme }: 
           </svg>
         </button>
       </div>
-      <p className="mt-2 text-center text-[10px] text-white/25">
-        空格 播放/暂停 · ← → 快退/快进 5 秒 · R 重播
-      </p>
+      <p className="mt-2 text-center text-[10px] text-white/25">{t.kbdHint}</p>
     </div>
   );
 }

@@ -6,6 +6,8 @@
  * 渲染两遍内容 + translateX(-50%) 实现无缝循环
  */
 import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
+import { STOCK_MAP } from '@/lib/stocks';
 
 interface TickerItem {
   key: string;
@@ -15,13 +17,31 @@ interface TickerItem {
   chg: number;
 }
 
+/** 模块级缓存: 首页↔回放往返等重复挂载不再重新请求; 失败不缓存以便重试 */
+let tickerCache: Promise<TickerItem[]> | null = null;
+
+function loadTicker(): Promise<TickerItem[]> {
+  tickerCache ??= fetch('/data/ticker.json')
+    .then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .catch((e) => {
+      tickerCache = null;
+      throw e;
+    });
+  return tickerCache;
+}
+
 export default function TickerTape() {
   const [items, setItems] = useState<TickerItem[]>([]);
+  const pathname = usePathname();
+  // 英文页显示英文名(数据文件只有 zh 字段, 名称从 STOCK_MAP 反查)
+  const enNames = pathname?.startsWith('/en') ?? false;
 
   useEffect(() => {
     let alive = true;
-    fetch('/data/ticker.json')
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
+    loadTicker()
       .then((d) => alive && Array.isArray(d) && setItems(d))
       .catch(() => {});
     return () => {
@@ -37,12 +57,14 @@ export default function TickerTape() {
         const up = it.chg >= 0;
         return (
           <span key={`${dup}-${it.key}`} className="mx-5 inline-flex items-baseline gap-1.5 font-mono text-xs">
-            <span className="text-white/60">{it.zh}</span>
+            <span className="text-white/60">
+              {enNames ? STOCK_MAP[it.key]?.en ?? it.zh : it.zh}
+            </span>
             <span className="text-white/40">{it.sym}</span>
             <span className="tabular-nums text-white/80">
               {it.sym === 'SPX' || it.sym === 'GLD' ? it.price.toFixed(2) : `$${it.price.toFixed(2)}`}
             </span>
-            <span className={`tabular-nums ${up ? 'text-up' : 'text-down'}`}>
+            <span className={`tabular-nums ${up ? 'text-profit' : 'text-loss'}`}>
               {up ? '▲' : '▼'} {Math.abs(it.chg).toFixed(2)}%
             </span>
           </span>

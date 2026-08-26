@@ -1,9 +1,10 @@
 /**
  * 分享海报 — 1080×1350 PNG (微信/小红书 竖版)
- * 纯 canvas 渲染, 输出 Blob; 货币表达与回放页统一(纯中文 万/亿)
+ * 纯 canvas 渲染, 输出 Blob; 货币与文案表达随语言切换(中文 万/亿 ↔ 英文 $K/M/B)
  */
 import { computeStats, type ReplayInput, type ReplayStats } from '@/lib/engine';
-import { dateISO, moneyZh, multiple, pct, profitZh, usdPrice } from '@/lib/format';
+import { dateISO, moneyEn, moneyZh, multiple, pct, usdPrice } from '@/lib/format';
+import type { Locale } from '@/lib/i18n';
 import type { StockMeta } from '@/lib/stocks';
 
 const SANS = '"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
@@ -16,10 +17,48 @@ interface ShareOpts {
   input: ReplayInput;
   stats?: ReplayStats;
   rawCloses?: (number | null)[];
+  locale?: Locale;
+}
+
+const COPY = {
+  zh: {
+    boughtIn: (y: string) => `假如你在 ${y}年 买入`,
+    holding: '起一直持有 · 红利复投',
+    dcaHolding: (m: string) => `起买入并每月再投 ${m} · 红利复投`,
+    invested: '总投入',
+    brand: '假如当时买了',
+    disclaimer: '历史模拟 · 仅供参考 · 不构成投资建议',
+    bought: '买入',
+    now: '现价',
+  },
+  en: {
+    boughtIn: (y: string) => 'If you had bought in',
+    holding: ' · buy & hold · div. reinvested',
+    dcaHolding: (m: string) => ` · plus ${m}/mo · div. reinvested`,
+    invested: 'Total invested',
+    brand: 'What If You Had Bought',
+    disclaimer: 'Historical simulation · Not investment advice',
+    bought: 'Bought',
+    now: 'Last',
+  },
+} as const;
+
+/** 单行文本自适应缩字号: 超出安全宽度时按比例缩小(下限 60%), 防长文案溢出海报 */
+function fitFont(ctx: CanvasRenderingContext2D, text: string, weight: number, size: number, family: string, maxW: number): number {
+  let s = size;
+  for (; s >= size * 0.6; s -= 2) {
+    ctx.font = `${weight} ${s}px ${family}`;
+    if (ctx.measureText(text).width <= maxW) break;
+  }
+  return s;
 }
 
 export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
   const { stock, input } = opts;
+  const locale: Locale = opts.locale ?? 'zh';
+  const c = COPY[locale];
+  const money = locale === 'en' ? moneyEn : moneyZh;
+  const stockName = locale === 'zh' ? stock.zh : stock.en;
   const stats = opts.stats ?? computeStats(input);
   const year = input.dates[input.start].slice(0, 4);
   const up = stats.returnPct >= 0;
@@ -49,26 +88,35 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
   ctx.textAlign = 'left';
   ctx.font = `600 34px ${SANS}`;
   ctx.fillStyle = 'rgba(245,245,247,0.5)';
-  ctx.fillText(`假如你在 ${year}年 买入`, P, P);
+  ctx.fillText(c.boughtIn(year), P, P);
 
   ctx.font = `800 76px ${SANS}`;
   ctx.fillStyle = '#f5f5f7';
-  ctx.fillText(`${moneyZh(input.amount)} ${stock.zh}`, P, P + 52);
+  // 标的+金额行也可能很长(Berkshire Hathaway), 同样自适应
+  const titleText = `${money(input.amount)} ${stockName}`;
+  fitFont(ctx, titleText, 800, 76, SANS, W - P * 2);
+  ctx.fillText(titleText, P, P + 52);
 
-  ctx.font = `500 36px ${MONO}`;
+  const holdText = input.monthly
+    ? `${dateISO(stats.startDate)} ${c.dcaHolding(money(input.monthly))}`
+    : `${dateISO(stats.startDate)} ${c.holding}`;
+  fitFont(ctx, holdText, 500, 36, MONO, W - P * 2);
   ctx.fillStyle = 'rgba(245,245,247,0.6)';
-  ctx.fillText(
-    `${dateISO(stats.startDate)} 起一直持有 · 红利复投`,
-    P,
-    P + 170
-  );
+  ctx.fillText(holdText, P, P + 170);
+
+  // DCA 模式: 副标题下补一行总投入
+  if (stats.invested != null) {
+    ctx.font = `500 30px ${MONO}`;
+    ctx.fillStyle = 'rgba(245,245,247,0.45)';
+    ctx.fillText(`${c.invested} ${money(stats.invested)}`, P, P + 224);
+  }
 
   // 巨幅结果
   ctx.font = `800 150px ${MONO}`;
   ctx.fillStyle = accent;
   ctx.shadowColor = up ? 'rgba(255,77,79,0.45)' : 'rgba(0,245,212,0.4)';
   ctx.shadowBlur = 46;
-  ctx.fillText(moneyZh(stats.finalValue), P, H * 0.33);
+  ctx.fillText(money(stats.finalValue), P, H * 0.33);
   ctx.shadowBlur = 0;
 
   // 指标行
@@ -78,8 +126,9 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
   const pw = ctx.measureText(pct(stats.returnPct)).width;
   ctx.font = `600 38px ${MONO}`;
   ctx.fillStyle = 'rgba(245,245,247,0.85)';
+  const cagrLabel = locale === 'en' ? `CAGR ${((stats.cagr * 100).toFixed(1))}%` : `年化 ${(stats.cagr * 100).toFixed(1)}%`;
   ctx.fillText(
-    `${multiple(stats.multiple)} · 年化 ${(stats.cagr * 100).toFixed(1)}%`,
+    `${multiple(stats.multiple)} · ${cagrLabel}`,
     P + pw + 36,
     H * 0.33 + 203
   );
@@ -124,7 +173,7 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(245,245,247,0.3)';
     ctx.fillText(
-      `买入 ${usdPrice(opts.rawCloses[input.start])} → 现价 ${usdPrice(opts.rawCloses[input.end])}`,
+      `${c.bought} ${usdPrice(opts.rawCloses[input.start])} → ${c.now} ${usdPrice(opts.rawCloses[input.end])}`,
       W / 2,
       cBottom + 66
     );
@@ -134,10 +183,10 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
   ctx.textAlign = 'left';
   ctx.font = `800 42px ${SANS}`;
   ctx.fillStyle = '#f5f5f7';
-  ctx.fillText('假如当时买了', P, H - 108);
+  ctx.fillText(c.brand, P, H - 108);
   ctx.font = `400 24px ${SANS}`;
   ctx.fillStyle = 'rgba(245,245,247,0.3)';
-  ctx.fillText('历史模拟 · 仅供参考 · 不构成投资建议', P, H - 54);
+  ctx.fillText(c.disclaimer, P, H - 54);
   ctx.textAlign = 'right';
   ctx.font = `600 34px ${MONO}`;
   ctx.fillStyle = 'rgba(245,245,247,0.55)';
