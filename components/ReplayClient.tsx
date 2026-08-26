@@ -4,14 +4,25 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import ReplayExperience from '@/components/ReplayExperience';
+import { dict, type Locale } from '@/lib/i18n';
 import { STOCK_MAP, startIndexForYear, type Series } from '@/lib/stocks';
 
-export default function ReplayClient() {
+export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
+  const t = dict(locale);
   const sp = useSearchParams();
   const key = sp.get('s') ?? 'msft';
   const year = Number(sp.get('y')) || 1996;
   const amount = Math.min(1e9, Math.max(100, Number(sp.get('a')) || 100_000));
-  const meme = sp.get('m') || undefined;
+  // 梗文案参数改为 mtext, 避免与定投模式 m=dca 冲突; 旧 m= 参数仅当非 dca 值时生效
+  const memeRaw = sp.get('mtext') ?? sp.get('m');
+  const meme = memeRaw && memeRaw !== 'dca' ? memeRaw : undefined;
+  // 定投模式: m=dca 时启用, monthly 为每月追加额(默认本金的 1/10)
+  const dca = sp.get('m') === 'dca' || sp.get('mode') === 'dca';
+  const monthly = dca
+    ? Math.min(1e8, Math.max(10, Number(sp.get('monthly')) || Math.round(amount / 10)))
+    : undefined;
+  // 对比模式(仅定投页有效): 同屏叠加同参数的一次性买入曲线
+  const compare = dca && sp.get('compare') === '1';
 
   const stock = STOCK_MAP[key];
   const [series, setSeries] = useState<Series | null>(null);
@@ -19,7 +30,7 @@ export default function ReplayClient() {
 
   useEffect(() => {
     if (!stock) {
-      setError('未知标的');
+      setError('unknown');
       return;
     }
     let alive = true;
@@ -33,21 +44,22 @@ export default function ReplayClient() {
       .then((data: Series) => {
         if (alive) setSeries(data);
       })
-      .catch(() => alive && setError('数据加载失败, 请刷新重试'));
+      .catch(() => alive && setError('load'));
     return () => {
       alive = false;
     };
   }, [key, stock]);
 
+  const homeHref = locale === 'en' ? '/en/' : '/';
   if (!stock || error) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4">
-        <p className="text-white/60">{error || `未知标的 ${key}`}</p>
+        <p className="text-white/60">{error === 'load' ? t.loadFailed : t.unknownStock}</p>
         <Link
-          href="/"
+          href={homeHref}
           className="rounded-full border border-white/15 px-5 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
         >
-          返回首页
+          {t.backHome}
         </Link>
       </div>
     );
@@ -56,7 +68,7 @@ export default function ReplayClient() {
   if (!series) {
     return (
       <div className="flex min-h-dvh items-center justify-center">
-        <div className="animate-pulse font-mono text-sm text-white/40">载入历史数据…</div>
+        <div className="animate-pulse font-mono text-sm text-white/40">{t.loadingData}</div>
       </div>
     );
   }
@@ -71,12 +83,16 @@ export default function ReplayClient() {
 
   return (
     <ReplayExperience
-      key={`${key}-${effYear}-${amount}`}
+      key={`${key}-${effYear}-${amount}-${monthly ?? 0}-${compare ? 'c' : ''}`}
       series={series}
       stock={stock}
       year={effYear}
       amount={amount}
       meme={meme}
+      monthly={monthly}
+      compare={compare}
+      locale={locale}
+      homeHref={homeHref}
     />
   );
 }

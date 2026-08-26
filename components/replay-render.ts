@@ -11,8 +11,8 @@
  *
  * 跨帧平滑状态(lo/hi/f)由调用方持有并经 smooth 传入 —— 渲染本身仍无副作用。
  */
-import { indexAtT, type ReplayInput } from '@/lib/engine';
-import { dateYM, moneyZh } from '@/lib/format';
+import { dcaSeries, indexAtT, type ReplayInput } from '@/lib/engine';
+import { dateYM, moneyEn, moneyZh } from '@/lib/format';
 
 export interface SmoothState {
   lo?: number; // 平滑后的 y 域下限(资产值)
@@ -32,6 +32,9 @@ export interface ChartOpts {
   smooth: SmoothState;
   watermark?: string;
   reduced?: boolean; // prefers-reduced-motion: 关闭脉冲环/里程碑闪光
+  locale?: 'zh' | 'en'; // 金额格式: 万/亿 ↔ $K/M/B
+  /** 对比曲线(定投页叠加一次性买入): 与主序列同长, 绝对资产值同坐标系 */
+  compareSeries?: Float64Array;
 }
 
 const MONO = 'ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace';
@@ -51,27 +54,47 @@ interface Prepared {
   val: Float64Array; // [0..n] 各日资产值
   min: Float64Array; // [0..k] 前缀最小资产值
   max: Float64Array; // [0..k] 前缀最大资产值
+  cmpMin?: Float64Array; // 对比曲线前缀最小(定投对比模式)
+  cmpMax?: Float64Array;
 }
 
 const prepCache = new WeakMap<ReplayInput, Prepared>();
+const cmpPrefixCache = new WeakMap<Float64Array, { min: Float64Array; max: Float64Array }>();
+
+/** 对比曲线前缀最值(按序列对象身份缓存一次; 帧内 O(1) 查表) */
+function cmpPrefix(cmp: Float64Array): { min: Float64Array; max: Float64Array } {
+  const cached = cmpPrefixCache.get(cmp);
+  if (cached) return cached;
+  const n = cmp.length;
+  const min = new Float64Array(n);
+  const max = new Float64Array(n);
+  let mn = Infinity;
+  let mx = -Infinity;
+  for (let j = 0; j < n; j++) {
+    if (cmp[j] < mn) mn = cmp[j];
+    if (cmp[j] > mx) mx = cmp[j];
+    min[j] = mn;
+    max[j] = mx;
+  }
+  const out = { min, max };
+  cmpPrefixCache.set(cmp, out);
+  return out;
+}
 
 function prepare(input: ReplayInput): Prepared {
   const cached = prepCache.get(input);
   if (cached) return cached;
   const n = input.end - input.start;
-  const base = input.closes[input.start];
-  const amount = input.amount;
   const ts = new Float64Array(n + 1);
-  const val = new Float64Array(n + 1);
+  // 资产序列: DCA(份额法)或一次性买入(比值法)统一由引擎给出
+  const val = dcaSeries(input);
   const min = new Float64Array(n + 1);
   const max = new Float64Array(n + 1);
   let mn = Infinity;
   let mx = -Infinity;
   for (let j = 0; j <= n; j++) {
-    const i = input.start + j;
-    const d = input.dates[i];
+    const d = input.dates[input.start + j];
     ts[j] = Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8));
-    val[j] = (amount * input.closes[i]) / base;
     if (val[j] < mn) mn = val[j];
     if (val[j] > mx) mx = val[j];
     min[j] = mn;
@@ -91,6 +114,8 @@ function mixColor(f: number, alpha = 1): string {
 
 export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const { w, h, dpr, t, ts, input, smooth } = o;
+  const money = o.locale === 'en' ? moneyEn : moneyZh;
+  const locale = o.locale ?? 'zh';
   ctx.save();
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
@@ -122,12 +147,27 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
           return t0 + (p.ts[k + 1] - t0) * f;
         })();
 
-  // ── y 域目标(已走过的全部历史; 前缀最值 O(1) 查表) ──
+  // ── y 域目标(已走过的全部历史; 前缀最值 O(1) 查表; 对比曲线纳入同一域) ──
   let vLo = p.min[k];
   let vHi = p.max[k];
   // 前沿插值点也纳入 y 域, 让刻度随线头渐进扩张而非瞬跳
   if (value < vLo) vLo = value;
   if (value > vHi) vHi = value;
+  const cmp = o.compareSeries;
+  let cmpVal: number | null = null;
+  if (cmp) {
+    const cp = cmpPrefix(cmp);
+    if (cmp[k] < vLo) vLo = cmp[k];
+    if (cmp[k] > vHi) vHi = cmp[k];
+    if (cp.min[k] < vLo) vLo = cp.min[k];
+    if (cp.max[k] > vHi) vHi = cp.max[k];
+    // 前沿插值(与主曲线同款线性插值)
+    const jk = Math.min(k, n - 1);
+    const cf = Math.min(Math.max(headPos - input.start - jk, 0), 1);
+    cmpVal = cmp[jk] + (cmp[Math.min(jk + 1, n)] - cmp[jk]) * cf;
+    if (cmpVal < vLo) vLo = cmpVal;
+    if (cmpVal > vHi) vHi = cmpVal;
+  }
   const padY = Math.max((vHi - vLo) * 0.12, vHi * 0.05);
   const tLo = Math.max(0, vLo - padY);
   const tHi = vHi + padY;
@@ -145,8 +185,23 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const lo = smooth.lo;
   const hi = Math.max(smooth.hi, smooth.lo + 1e-9);
 
-  // ── 盈亏状态色: 红↔青绿 无缝过渡 ──
-  const targetF = value >= amount ? 1 : 0;
+  // ── 盈亏状态色: 红↔青绿 无缝过渡(相对截至当日的累计投入) ──
+  const putIn = (() => {
+    if (!input.monthly) return amount;
+    // 截至前沿所在日的注入笔数
+    let months = 0;
+    let lastM = -1;
+    for (let j = 0; j <= k; j++) {
+      const d = input.dates[input.start + j];
+      const m = +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
+      if (lastM < m) {
+        lastM = m;
+        months++;
+      }
+    }
+    return amount + input.monthly * (months - 1);
+  })();
+  const targetF = value >= putIn ? 1 : 0;
   smooth.f = smooth.f == null ? targetF : smooth.f + (targetF - smooth.f) * damp(0.07);
   const f = smooth.f;
   const lineColor = mixColor(f);
@@ -181,13 +236,41 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.lineTo(plotR, gy);
     ctx.stroke();
     ctx.fillStyle = 'rgba(245,245,247,0.35)';
-    ctx.fillText(moneyZh(gv), 8, gy);
+    ctx.fillText(money(gv), 8, gy);
   }
   ctx.strokeStyle = 'rgba(245,245,247,0.1)';
   ctx.beginPath();
   ctx.moveTo(plotL + 0.5, plotT);
   ctx.lineTo(plotL + 0.5, plotB);
   ctx.stroke();
+
+  // ── 对比模式图例(右上角, 两行: 主线/对比线) ──
+  if (cmp) {
+    const lx = plotR - 8;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.font = `500 11px ${MONO}`;
+    // 主线样式
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(lx - 96, plotT + 12);
+    ctx.lineTo(lx - 58, plotT + 12);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(245,245,247,0.55)';
+    ctx.fillText(locale === 'en' ? 'DCA' : '定投', lx, plotT + 12);
+    // 对比线样式
+    ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = 'rgba(245,245,247,0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(lx - 96, plotT + 30);
+    ctx.lineTo(lx - 58, plotT + 30);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(245,245,247,0.4)';
+    ctx.fillText(locale === 'en' ? 'Lump sum' : '一次性', lx, plotT + 30);
+  }
 
   // ── X 轴时间刻度(按年月边界动态稀疏, 随时间范围自动从月缩到年) ──
   ctx.textAlign = 'center';
@@ -231,6 +314,19 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.beginPath();
   ctx.rect(plotL, plotT - 4, plotW, plotH + 8);
   ctx.clip();
+  // ── 对比曲线(垫底层): 灰白虚线, 一次性买入参照 ──
+  if (cmp) {
+    ctx.beginPath();
+    ctx.moveTo(plotL, yOf(cmp[0]));
+    for (let j = 1; j <= k; j++) ctx.lineTo(xOf(j), yOf(cmp[j]));
+    if (cmpVal != null) ctx.lineTo(headX, yOf(cmpVal));
+    ctx.setLineDash([6, 5]);
+    ctx.strokeStyle = 'rgba(245,245,247,0.4)';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
   const area = ctx.createLinearGradient(0, plotT, 0, plotB);
   area.addColorStop(0, mixColor(f, 0.3));
   area.addColorStop(1, 'rgba(0,0,0,0)');
@@ -313,7 +409,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.stroke();
 
   // ── 跟随资产大字(光点左侧, 无框发光体; 左侧放不下时移到点上方) ──
-  const label = moneyZh(value);
+  const label = money(value);
   const fs = Math.round(Math.min(Math.max(w * 0.034, 20), 34));
   ctx.font = `800 ${fs}px ${SANS}`;
   ctx.textBaseline = 'middle';
