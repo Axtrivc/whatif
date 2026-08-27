@@ -190,7 +190,9 @@ for (const [key, secids, minPoints, ,] of targets) {
         const [d, c] = row.split(',');
         map.set(d.replace(/-/g, ''), Number(c));
       }
-      payload.rawCloses = dates.map((d) => map.get(d) ?? null);
+      const raw = dates.map((d) => map.get(d) ?? null);
+      // 与后复权完全一致(无分红/未除权)时省略该字段, 数据文件体积约减半; 展示端回退 closes
+      if (raw.some((v, i) => v !== closes[i])) payload.rawCloses = raw;
     }
     await writeFile(path.join(outDir, `${key}.json`), JSON.stringify(payload));
     manifest[key] = { first: payload.first, last: payload.last, points: payload.points };
@@ -222,7 +224,7 @@ if (wantBtc) {
       points: dates.length,
       dates,
       closes,
-      rawCloses: closes.slice(), // 无分红概念, 真实价即复权价
+      // 无分红概念, 真实价即复权价(不写 rawCloses, 展示端回退 closes)
       fetchedAt: new Date().toISOString().slice(0, 10),
     };
     await writeFile(path.join(outDir, `${key}.json`), JSON.stringify(payload));

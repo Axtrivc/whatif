@@ -55,8 +55,13 @@ export interface Series {
   points: number;
   dates: string[]; // YYYYMMDD
   closes: number[]; // 后复权收盘(计算用)
-  rawCloses?: (number | null)[]; // 不复权收盘(展示用), 与 dates 对齐
+  rawCloses?: (number | null)[]; // 不复权收盘(展示用), 与 dates 对齐; 与 closes 完全一致时省略(无分红/未除权标的)
   fetchedAt: string;
+}
+
+/** 不复权展示价: rawCloses 缺省(与后复权一致的标的)时回退 closes */
+export function rawClosesOf(series: Series): (number | null)[] {
+  return series.rawCloses ?? series.closes;
 }
 
 const seriesCache = new Map<string, Series | null>();

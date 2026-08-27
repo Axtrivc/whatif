@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { computeStats, dcaInvested, dcaSeries, durationFor, investedSeries, type ReplayInput } from '@/lib/engine';
 import { dateYM, fmtPrice, money, pct, profit } from '@/lib/format';
 import { dict, type Locale } from '@/lib/i18n';
-import { startIndexForYear, type Series, type StockMeta } from '@/lib/stocks';
+import { rawClosesOf, startIndexForYear, type Series, type StockMeta } from '@/lib/stocks';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
 import { GAIN, LOSS } from '@/lib/tokens';
 import { buildShareImage } from '@/components/ShareCard';
@@ -209,8 +209,9 @@ export default function ReplayExperience({
       if (plRef.current) plRef.current.style.color = upNow ? UP : DOWN;
       if (dateRef.current) dateRef.current.textContent = dateYM(series.dates[i]);
       if (priceRef.current) {
-        const buy = series.rawCloses?.[i0] ?? null;
-        const cur = series.rawCloses?.[i] ?? null;
+        const rc = rawClosesOf(series);
+        const buy = rc[i0] ?? null;
+        const cur = rc[i] ?? null;
         priceRef.current.textContent = t.buyPriceNowPrice(
           fmtPrice(buy, stock.ccy),
           fmtPrice(cur, stock.ccy)
@@ -423,7 +424,7 @@ export default function ReplayExperience({
     setPosterMsg(null);
     const fileName = `whatif-${stock.key}-${year}${monthly ? '-dca' : ''}.png`;
     try {
-      const blob = await buildShareImage({ stock, input, stats, rawCloses: series.rawCloses, locale });
+      const blob = await buildShareImage({ stock, input, stats, rawCloses: rawClosesOf(series), locale });
       const file = new File([blob], fileName, { type: 'image/png' });
       const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
       if (nav.canShare?.({ files: [file] })) {
@@ -540,25 +541,25 @@ export default function ReplayExperience({
               monthly ? (
                 <>
                   假如你在 {year}年 买入 {amountLabel}{' '}
-                  <span className="text-ink-950/45" style={{}}>{stock.zh}</span>
+                  <span className="text-ink-950/45">{stock.zh}</span>
                   ，每月再投 {monthlyLabel}
                 </>
               ) : (
                 <>
                   假如你在 {year}年 买入 {amountLabel}{' '}
-                  <span className="text-ink-950/45" style={{}}>{stock.zh}</span>
+                  <span className="text-ink-950/45">{stock.zh}</span>
                 </>
               )
             ) : monthly ? (
               <>
                 {amountLabel} of{' '}
-                <span className="text-ink-950/45" style={{}}>{stock.en}</span> in{' '}
+                <span className="text-ink-950/45">{stock.en}</span> in{' '}
                 {year}, plus {monthlyLabel}/mo
               </>
             ) : (
               <>
                 If you bought {amountLabel} of{' '}
-                <span className="text-ink-950/45" style={{}}>{stock.en}</span> in{' '}
+                <span className="text-ink-950/45">{stock.en}</span> in{' '}
                 {year}
               </>
             )}
@@ -716,10 +717,13 @@ export default function ReplayExperience({
       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
         <span className="text-ink-950/45">{t.simNote}</span>
         <span ref={priceRef} className="font-mono text-ink-950/45 tabular-nums">
-          {t.buyPriceNowPrice(
-            fmtPrice(series.rawCloses?.[input.start] ?? null, stock.ccy),
-            fmtPrice(series.rawCloses?.[input.start] ?? null, stock.ccy)
-          )}
+          {(() => {
+            const rc = rawClosesOf(series);
+            return t.buyPriceNowPrice(
+              fmtPrice(rc[input.start] ?? null, stock.ccy),
+              fmtPrice(rc[input.start] ?? null, stock.ccy)
+            );
+          })()}
         </span>
       </div>
 
