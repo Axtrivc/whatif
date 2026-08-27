@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    position: relative;
+    background-color: #ffffff;
+    background-image: radial-gradient(circle at 1.2px 1.2px, rgba(17,17,20,0.055) 1.2px, transparent 0);
+    background-size: 24px 24px;
+    color: #111114;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 84px;
+  }
+  .bracket { position: absolute; width: 44px; height: 44px; }
+  .tl { top: 26px; left: 26px; border-top: 4px solid rgba(17,17,20,.45); border-left: 4px solid rgba(17,17,20,.45); }
+  .br { bottom: 26px; right: 26px; border-bottom: 4px solid rgba(17,17,20,.45); border-right: 4px solid rgba(17,17,20,.45); }
+  .eyebrow { display: flex; align-items: center; margin-bottom: 30px; }
+  .eyebrow .dot { width: 15px; height: 15px; background: #d42b3a; margin-right: 16px; }
+  .eyebrow .label { font-size: 25px; letter-spacing: 8px; opacity: .48; font-weight: 600; }
+  h1 { display: contents; }
+  .line { font-size: 76px; font-weight: 800; line-height: 1.18; letter-spacing: 1px; }
+  .line .red { color: #d42b3a; }
+  .stats { display: flex; gap: 44px; margin-top: 38px; opacity: .62;
+           font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 31px; font-weight: 600; }
+  .rule { position: absolute; left: 84px; right: 84px; bottom: 96px; height: 2px; background: rgba(17,17,20,.14); }
+  .site { position: absolute; left: 84px; bottom: 44px;
+          font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 27px; opacity: .5; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="bracket tl"></div>
+  <div class="bracket br"></div>
+
+  <div class="eyebrow">
+    <span class="dot"></span>
+    <span class="label">WHATIF // 回测模拟报告</span>
+  </div>
+
+  <h1>
+    <div class="line">假如<span class="red">1996 年</span>买入微软，</div>
+    <div class="line">今天值多少钱？</div>
+  </h1>
+
+  <div class="stats">
+    <span>微软 1996 ×94.9</span>
+    <span>比特币 2013 ×373</span>
+    <span>英伟达 2015 ×433</span>
+  </div>
+
+  <div class="rule"></div>
+  <div class="site">whatif.axtrivc.com</div>
+</body>
+</html>

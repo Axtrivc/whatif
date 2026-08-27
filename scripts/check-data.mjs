@@ -55,6 +55,22 @@ for (const key of stockKeys()) {
     failures++;
     continue;
   }
+  // rawCloses(不复权展示价)与 dates 对齐校验: 长度必须一致, 错位会错标"买入价/现价"
+  if (j.rawCloses != null) {
+    if (!Array.isArray(j.rawCloses) || j.rawCloses.length !== dates.length) {
+      console.error(
+        `✘ ${key}: rawCloses(${Array.isArray(j.rawCloses) ? j.rawCloses.length : '非数组'}) 与 dates(${dates.length}) 不对齐`
+      );
+      failures++;
+      continue;
+    }
+    const nulls = j.rawCloses.filter((v) => v == null || !Number.isFinite(v)).length;
+    if (nulls === dates.length) {
+      console.error(`✘ ${key}: rawCloses 全部为空值`);
+      failures++;
+      continue;
+    }
+  }
   // 抽样校验日期升序 + 收盘价为正(全扫太贵, 头尾 + 中段各取一点)
   const probe = [0, Math.floor(dates.length / 2), dates.length - 1];
   let bad = false;

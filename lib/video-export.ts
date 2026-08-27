@@ -8,7 +8,7 @@
  * 提高时间倍率(采样同一条渲染曲线, 只是 t 推进更快)。
  * 降级: VideoEncoder 不可用(旧浏览器/Firefox)时调用方隐藏入口。
  */
-import { ArrayBufferTarget, Muxer } from 'mp4-muxer';
+import type { ArrayBufferTarget as Mp4ArrayBufferTarget, Muxer as Mp4Muxer } from 'mp4-muxer';
 import { durationFor, type ReplayInput } from '@/lib/engine';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
 import type { Locale } from '@/lib/i18n';
@@ -31,6 +31,7 @@ const MIN_SEC = 12; // 太短的回放不加速, 保底时长
 interface ExportOpts {
   input: ReplayInput;
   locale: Locale;
+  ccy?: string; // 标的计价货币(英文金额前缀), 缺省 USD
   compareSeries?: Float64Array;
   onProgress?: (p: number) => void; // 0..1
   signal?: AbortSignal;
@@ -38,7 +39,9 @@ interface ExportOpts {
 
 /** 导出回放 MP4, 完成 resolve 下载 Blob */
 export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
-  const { input, locale, compareSeries, onProgress, signal } = opts;
+  const { input, locale, ccy, compareSeries, onProgress, signal } = opts;
+  // mp4-muxer 只在真正导出时才加载(懒 chunk), 回放页常规浏览不必下载这段 JS
+  const { Muxer, ArrayBufferTarget } = await import('mp4-muxer');
 
   const animSec = durationFor(input.end - input.start);
   const speed = Math.max(1, animSec / Math.max(MIN_SEC, Math.min(TARGET_SEC, animSec)));
@@ -94,6 +97,7 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
       smooth,
       watermark: 'whatif.axtrivc.com',
       locale,
+      ccy,
       compareSeries,
     });
     const frame = new (window as any).VideoFrame(cv, {
@@ -120,6 +124,6 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
   enc.close();
   if (encError) throw encError;
   muxer.finalize();
-  const { buffer } = muxer.target as ArrayBufferTarget;
+  const { buffer } = muxer.target as Mp4ArrayBufferTarget;
   return new Blob([buffer], { type: 'video/mp4' });
 }

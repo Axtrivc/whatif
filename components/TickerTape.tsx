@@ -13,9 +13,13 @@ interface TickerItem {
   key: string;
   zh: string;
   sym: string;
+  ccy?: string; // 计价货币; '' = 指数无符号, 缺省 USD(旧数据文件兼容)
   price: number;
   chg: number;
 }
+
+/** 币种前缀统一取自设计令牌 */
+import { ccyPrefix } from '@/lib/tokens';
 
 /** 模块级缓存: 首页↔回放往返等重复挂载不再重新请求; 失败不缓存以便重试 */
 let tickerCache: Promise<TickerItem[]> | null = null;
@@ -62,7 +66,7 @@ export default function TickerTape() {
             </span>
             <span className="text-ink-950/40">{it.sym}</span>
             <span className="tabular-nums text-ink-950/80 transition-colors group-hover:text-gain">
-              {it.sym === 'SPX' ? it.price.toFixed(2) : `$${it.price.toFixed(2)}`}
+              {ccyPrefix(it.ccy) + it.price.toFixed(2)}
             </span>
             <span className={`tabular-nums ${up ? 'text-profit' : 'text-loss'}`}>
               {up ? '▲' : '▼'} {Math.abs(it.chg).toFixed(2)}%
@@ -74,13 +78,20 @@ export default function TickerTape() {
   );
 
   return (
-    <div className="relative mt-3 overflow-hidden rounded-xl border border-ink-950/8 bg-black/[0.03] py-2">
-      {/* 左右渐隐遮罩 */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-[#fafafa] to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-[#fafafa] to-transparent" />
-      <div className="wi-marquee flex w-max">
-        {row(0)}
-        {row(1)}
+    <div className="relative mt-3 flex items-stretch overflow-hidden rounded-lg border border-ink-950/10 bg-white">
+      {/* 左端实时信号灯(行情屏语言) */}
+      <div className="z-10 flex shrink-0 items-center gap-1.5 border-r border-ink-950/10 bg-white px-3" aria-hidden>
+        <span className="wi-live-dot" />
+        <span className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-ink-950/55">
+          Live
+        </span>
+      </div>
+      {/* 两侧渐隐用 mask 而非色块渐变, 与全页点阵底纹不打架 */}
+      <div className="overflow-hidden py-2 [mask-image:linear-gradient(to_right,transparent,black_20px,black_calc(100%-20px),transparent)]">
+        <div className="wi-marquee flex w-max">
+          {row(0)}
+          {row(1)}
+        </div>
       </div>
     </div>
   );

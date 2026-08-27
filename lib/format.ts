@@ -1,4 +1,5 @@
 /** 数值与日期格式化(引擎/HUD/分享卡共用, 必须纯函数) */
+import { ccyPrefix } from './tokens';
 
 const trim = (x: number, d: number): string => {
   let s = x.toFixed(d);
@@ -27,14 +28,15 @@ export function profitZh(v: number): string {
   return `${sign}${trim(abs, 0)}`;
 }
 
-/** 金额(英文缩写): $1.23M / $4.87B (999,500 → $1.00M, 不出现 $1000K; 整数美元不带小数) */
-export function moneyEn(v: number): string {
+/** 金额(英文缩写, 币种可插): $1.23M / HK$4.87B / ¥1.2M (999,500 → 1.00M, 不出现 1000K; 整数不带小数) */
+export function moneyEn(v: number, ccy = 'USD'): string {
+  const sym = ccyPrefix(ccy);
   const abs = Math.abs(v);
-  if (abs >= 999_995_000_000) return `$${(v / 1e12).toFixed(2)}T`;
-  if (abs >= 999_995_000) return `$${(v / 1e9).toFixed(2)}B`;
-  if (abs >= 999_500) return `$${(v / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `$${(v / 1e3).toFixed(abs >= 1e5 ? 0 : 1)}K`;
-  return Number.isInteger(v) ? `$${v}` : `$${v.toFixed(2)}`;
+  if (abs >= 999_995_000_000) return `${sym}${(v / 1e12).toFixed(2)}T`;
+  if (abs >= 999_995_000) return `${sym}${(v / 1e9).toFixed(2)}B`;
+  if (abs >= 999_500) return `${sym}${(v / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `${sym}${(v / 1e3).toFixed(abs >= 1e5 ? 0 : 1)}K`;
+  return Number.isInteger(v) ? `${sym}${v}` : `${sym}${v.toFixed(2)}`;
 }
 
 /** 涨幅: +244.02% / -91.83% */
@@ -58,24 +60,24 @@ export function dateYM(d: string): string {
   return `${d.slice(0, 4)}-${d.slice(4, 6)}`;
 }
 
-/** 真实美元价格: $26.71 (不复权收盘) */
-export function usdPrice(v: number | null | undefined): string {
+/** 真实价格展示: $26.71 / HK$312.40 / ¥1420.00 (不复权收盘, 按标的计价货币) */
+export function fmtPrice(v: number | null | undefined, ccy = 'USD'): string {
   if (v == null || !Number.isFinite(v)) return '-';
-  return `$${v.toFixed(2)}`;
+  return `${ccyPrefix(ccy)}${v.toFixed(2)}`;
 }
 
-/** 带符号盈亏(英文缩写): +$1.23M / -$918.3K */
-export function profitEn(v: number): string {
+/** 带符号盈亏(英文缩写): +$1.23M / -HK$918.3K */
+export function profitEn(v: number, ccy = 'USD'): string {
   const sign = v >= 0 ? '+' : '-';
-  return `${sign}${moneyEn(Math.abs(v))}`;
+  return `${sign}${moneyEn(Math.abs(v), ccy)}`;
 }
 
-/** 按语言选择金额格式 */
-export function money(amount: number, locale: 'zh' | 'en'): string {
-  return locale === 'zh' ? moneyZh(amount) : moneyEn(amount);
+/** 按语言选择金额格式(zh 为万/亿中性无符号; en 带币种前缀, 缺省 USD) */
+export function money(amount: number, locale: 'zh' | 'en', ccy = 'USD'): string {
+  return locale === 'zh' ? moneyZh(amount) : moneyEn(amount, ccy);
 }
 
-/** 按语言选择带符号盈亏格式 */
-export function profit(amount: number, locale: 'zh' | 'en'): string {
-  return locale === 'zh' ? profitZh(amount) : profitEn(amount);
+/** 按语言选择带符号盈亏 */
+export function profit(amount: number, locale: 'zh' | 'en', ccy = 'USD'): string {
+  return locale === 'zh' ? profitZh(amount) : profitEn(amount, ccy);
 }

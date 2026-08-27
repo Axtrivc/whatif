@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     title: '假如当时买了 · WhatIf',
     description: '选一只股票、一个年份、一笔本金，看动画回放复利的奇迹。',
     locale: 'zh_CN',
-    images: [{ url: '/og.png', width: 878, height: 493, alt: '假如1996年买入微软，今天值多少钱' }],
+    images: [{ url: '/og.png', width: 1200, height: 630, alt: '假如1996年买入微软，今天值多少钱' }],
   },
   twitter: { card: 'summary_large_image', images: ['/og.png'] },
 };
@@ -40,7 +40,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body className="min-h-dvh bg-[#fafafa] text-ink-950 antialiased">
+      <body className="wi-blueprint min-h-dvh bg-[#fafafa] text-ink-950 antialiased">
         <HtmlLang />
         {children}
       </body>

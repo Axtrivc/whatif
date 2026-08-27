@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { computeStats, dcaInvested, dcaSeries, durationFor, investedSeries, type ReplayInput } from '@/lib/engine';
-import { dateYM, money, pct, profit, usdPrice } from '@/lib/format';
+import { dateYM, fmtPrice, money, pct, profit } from '@/lib/format';
 import { dict, type Locale } from '@/lib/i18n';
 import { startIndexForYear, type Series, type StockMeta } from '@/lib/stocks';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
+import { GAIN, LOSS } from '@/lib/tokens';
 import { buildShareImage } from '@/components/ShareCard';
 import { exportReplayVideo, videoExportSupported } from '@/lib/video-export';
 import TickerTape from '@/components/TickerTape';
@@ -24,31 +25,41 @@ interface Props {
 }
 
 const SPEEDS = [1, 2, 4] as const;
-const UP = '#FF4C6C';
-const DOWN = '#00F5D4';
+// 盈亏双色与 canvas/海报同源(设计令牌, 白底可读)
+const UP = GAIN;
+const DOWN = LOSS;
 
-/** 结算数字滚动(ease-out cubic, 从 0 滚到目标值) */
+/** 结算数字滚动(ease-out cubic, 从 0 滚到目标值); reduced-motion 时直接显示终值。
+ *  format 经 ref 取最新 — 结算卡可见期间的任何父级重渲染都不应让数字闪回 0 重滚 */
 function CountUp({
   target,
   format,
   duration = 1100,
+  reduced = false,
 }: {
   target: number;
   format: (v: number) => string;
   duration?: number;
+  reduced?: boolean;
 }) {
-  const [text, setText] = useState(() => format(0));
+  const [text, setText] = useState(() => format(reduced ? target : 0));
+  const fmtRef = useRef(format);
+  fmtRef.current = format;
   useEffect(() => {
+    if (reduced) {
+      setText(fmtRef.current(target));
+      return;
+    }
     let raf = 0;
     const t0 = performance.now();
     const step = (now: number) => {
       const p = Math.min((now - t0) / duration, 1);
-      setText(format(target * (1 - Math.pow(1 - p, 3))));
+      setText(fmtRef.current(target * (1 - Math.pow(1 - p, 3))));
       if (p < 1) raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [target, format, duration]);
+  }, [target, duration, reduced]);
   return <>{text}</>;
 }
 
@@ -85,6 +96,9 @@ export default function ReplayExperience({
   const [done, setDone] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [posterMsg, setPosterMsg] = useState<'ok' | 'fail' | null>(null); // 海报生成结果反馈
+  const wasPlayingRef = useRef(false); // 拖动进度条前是否在播(松手自动恢复)
+  const titleRef = useRef(0); // 标签页标题上次更新时刻(500ms 节流)
   const [videoPct, setVideoPct] = useState<number | null>(null); // null=空闲, 0-100=导出中
   const videoSupported = useMemo(() => videoExportSupported(), []);
   const videoAbortRef = useRef<AbortController | null>(null); // 卸载时中止编码
@@ -121,8 +135,8 @@ export default function ReplayExperience({
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     []
   );
-  const amountLabel = money(amount, locale);
-  const monthlyLabel = monthly ? money(monthly, locale) : '';
+  const amountLabel = money(amount, locale, stock.ccy);
+  const monthlyLabel = monthly ? money(monthly, locale, stock.ccy) : '';
   const stockName = locale === 'zh' ? stock.zh : stock.en;
   const title = monthly
     ? t.titleBuyDca(year, amountLabel, monthlyLabel, stockName)
@@ -156,6 +170,7 @@ export default function ReplayExperience({
         watermark: 'whatif.axtrivc.com',
         reduced,
         locale,
+        ccy: stock.ccy,
         compareSeries,
       });
 
@@ -178,22 +193,37 @@ export default function ReplayExperience({
       if (pctRef.current) {
         pctRef.current.textContent = pct(gain / putIn);
         pctRef.current.style.color = upNow ? UP : DOWN;
-        pctRef.current.style.textShadow = `0 0 26px ${upNow ? UP : DOWN}66`;
+        // 标签页标题同步实时收益率(切去别的标签页也能瞟到, 500ms 节流;
+        // 终点帧 tt>=1 强制放行, 避免抽查/快进后标题停在半路旧值)
+        const nowMs = performance.now();
+        if (tt >= 1 || nowMs - titleRef.current > 500) {
+          titleRef.current = nowMs;
+          document.title = `${pct(gain / putIn)} ${stockName} · WhatIf`;
+        }
       }
       if (plRef.current) {
         plRef.current.textContent = input.monthly
-          ? `${profit(gain, locale)} / ${money(putIn, locale)}`
-          : profit(gain, locale);
+          ? `${profit(gain, locale, stock.ccy)} / ${money(putIn, locale, stock.ccy)}`
+          : profit(gain, locale, stock.ccy);
       }
       if (plRef.current) plRef.current.style.color = upNow ? UP : DOWN;
       if (dateRef.current) dateRef.current.textContent = dateYM(series.dates[i]);
       if (priceRef.current) {
         const buy = series.rawCloses?.[i0] ?? null;
         const cur = series.rawCloses?.[i] ?? null;
-        priceRef.current.textContent = t.buyPriceNowPrice(usdPrice(buy), usdPrice(cur));
+        priceRef.current.textContent = t.buyPriceNowPrice(
+          fmtPrice(buy, stock.ccy),
+          fmtPrice(cur, stock.ccy)
+        );
       }
-      if (scrubRef.current && document.activeElement !== scrubRef.current) {
-        scrubRef.current.value = String(tt);
+      if (scrubRef.current) {
+        if (document.activeElement !== scrubRef.current) {
+          scrubRef.current.value = String(tt);
+          // --p 驱动滑杆已播放段填充(时间轴游标语言), 与拖动手感一致
+          scrubRef.current.style.setProperty('--p', tt.toFixed(4));
+        }
+        // 读屏用户实时获知当前回放日期
+        scrubRef.current.setAttribute('aria-valuetext', dateYM(series.dates[i]));
       }
     },
     [input, series, reduced, locale, t, compareSeries]
@@ -270,6 +300,25 @@ export default function ReplayExperience({
     };
   }, [playing, speed, duration, draw, input]);
 
+  // 标签页标题: 进入时记下原标题, 离开回放(含切结算重播)时恢复
+  useEffect(() => {
+    const prev = document.title;
+    return () => {
+      document.title = prev;
+    };
+  }, []);
+
+  // 视频导出进行中: 关闭/刷新页面前提醒, 防误触丢掉几分钟的编码
+  useEffect(() => {
+    if (videoPct == null) return;
+    const guard = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+  }, [videoPct]);
+
   // 卸载时清理终点计时器 + 中止进行中的视频导出
   useEffect(
     () => () => {
@@ -287,6 +336,7 @@ export default function ReplayExperience({
     maxMultRef.current = 1;
     underRef.current = false;
     setDone(false);
+    setPosterMsg(null);
     setPlaying(true);
     draw(0); // 立即回到起点帧, 不等下一个 rAF(避免残留终局画面一闪)
   }, [draw]);
@@ -301,6 +351,7 @@ export default function ReplayExperience({
       maxMultRef.current = 1;
       underRef.current = false;
       setDone(v >= 1);
+      setPosterMsg(null);
       draw(v);
     },
     [duration, draw]
@@ -334,6 +385,9 @@ export default function ReplayExperience({
         e.preventDefault();
         const step = (e.key === 'ArrowRight' ? 5 : -5) / duration;
         scrub(Math.min(1, Math.max(0, tRef.current + step)));
+      } else if (['1', '2', '4'].includes(e.key)) {
+        // 数字键切倍速(键位=档位值: 1x/2x/4x)
+        setSpeed(Number(e.key) as (typeof SPEEDS)[number]);
       } else if (e.key === 'r' || e.key === 'R') {
         restart();
       }
@@ -342,25 +396,51 @@ export default function ReplayExperience({
     return () => window.removeEventListener('keydown', onKey);
   }, [duration, restart, scrub]);
 
+  /** 进度条拖动: 按下先暂停(看清单帧), 松手恢复原播放状态 — 手感与主流播放器一致 */
+  const scrubStart = () => {
+    wasPlayingRef.current = playing && tRef.current < 1;
+    if (tRef.current < 1) setPlaying(false);
+  };
+  const scrubEnd = () => {
+    if (wasPlayingRef.current && tRef.current < 1) {
+      wasPlayingRef.current = false;
+      setPlaying(true);
+    }
+  };
+
+  const downloadBlob = (blob: Blob, name: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const shareImage = async () => {
-    if (!stats) return;
+    if (!stats || shareBusy) return;
     setShareBusy(true);
+    setPosterMsg(null);
+    const fileName = `whatif-${stock.key}-${year}${monthly ? '-dca' : ''}.png`;
     try {
       const blob = await buildShareImage({ stock, input, stats, rawCloses: series.rawCloses, locale });
-      const file = new File([blob], `whatif-${stock.key}-${year}${monthly ? '-dca' : ''}.png`, { type: 'image/png' });
+      const file = new File([blob], fileName, { type: 'image/png' });
       const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
       if (nav.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title } as ShareData);
+        try {
+          await navigator.share({ files: [file], title } as ShareData);
+        } catch (err) {
+          if ((err as DOMException)?.name === 'AbortError') return; // 用户关掉分享面板: 海报已生成, 不算失败
+          downloadBlob(blob, fileName); // 分享通道实际不可用(权限/环境) → 降级为下载, 别浪费已生成的海报
+        }
       } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.name;
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, fileName);
       }
+      setPosterMsg('ok');
+      setTimeout(() => setPosterMsg(null), 2000);
     } catch {
-      /* 海报生成/分享失败静默, 按钮恢复可用即可 */
+      setPosterMsg('fail'); // 生成环节失败才可见反馈, 按钮本身即重试入口
+      setTimeout(() => setPosterMsg(null), 2600);
     } finally {
       setShareBusy(false);
     }
@@ -369,18 +449,41 @@ export default function ReplayExperience({
   const shareLink = async () => {
     const base = locale === 'en' ? '/en/replay/' : '/replay/';
     const dcaQ = monthly ? `&m=dca&monthly=${monthly}${compare ? '&compare=1' : ''}` : '';
-    const url = `${location.origin}${base}?s=${stock.key}&y=${year}&a=${amount}${dcaQ}`;
+    const memeQ = meme ? `&mtext=${encodeURIComponent(meme)}` : ''; // 梗文案随链接传播, 分享出去的回放不丢副标题
+    const url = `${location.origin}${base}?s=${stock.key}&y=${year}&a=${amount}${dcaQ}${memeQ}`;
+    const fallbackCopy = () => {
+      // 非安全上下文/剪贴板权限被拒: 退回隐藏 textarea + execCommand 方案
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        return document.execCommand('copy');
+      } finally {
+        ta.remove();
+      }
+    };
+    let copiedOk = false;
     try {
       await navigator.clipboard.writeText(url);
+      copiedOk = true;
+    } catch {
+      copiedOk = fallbackCopy();
+    }
+    if (copiedOk) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* 剪贴板不可用时静默 */
     }
   };
 
   const exportVideo = async () => {
-    if (!stats || videoPct != null) return;
+    if (!stats) return;
+    if (videoPct != null) {
+      videoAbortRef.current?.abort(); // 导出中再次点击 = 取消编码
+      return;
+    }
     setVideoPct(0);
     const ctl = new AbortController();
     videoAbortRef.current = ctl;
@@ -388,6 +491,7 @@ export default function ReplayExperience({
       const blob = await exportReplayVideo({
         input,
         locale,
+        ccy: stock.ccy,
         compareSeries,
         onProgress: (p) => setVideoPct(Math.round(p * 100)),
         signal: ctl.signal,
@@ -409,8 +513,8 @@ export default function ReplayExperience({
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-5">
-      {/* ════════ 顶部状态栏: 左(返回+本金) / 中(大标题+梗) / 右(战报区) ════════ */}
-      <header className="grid grid-cols-[minmax(90px,auto)_1fr_minmax(150px,auto)] items-start gap-3 pb-4">
+      {/* ════════ 顶部状态栏(HUD 分区): 左(返回+本金) / 中(大标题+梗) / 右(战报区) ════════ */}
+      <header className="grid grid-cols-[minmax(56px,auto)_1fr_minmax(88px,auto)] items-start gap-2 border-b border-ink-950/8 pb-4 sm:grid-cols-[minmax(90px,auto)_1fr_minmax(150px,auto)] sm:gap-3">
         <div className="flex flex-col gap-1.5 pt-1">
           <Link
             href={homeHref}
@@ -470,7 +574,7 @@ export default function ReplayExperience({
           </div>
           <div
             ref={pctRef}
-            className="text-4xl font-black leading-none tracking-tight tabular-nums sm:text-5xl"
+            className="text-[27px] font-black leading-none tracking-tight tabular-nums sm:text-5xl"
             style={{ color: UP }}
           >
             +0.00%
@@ -487,12 +591,12 @@ export default function ReplayExperience({
         </div>
       </header>
 
-      {/* ════════ 电影感图表舞台(宽幅 + 盈亏双色流光边框) ════════ */}
-      <div
-        ref={boxRef}
-        className="relative aspect-[16/9] w-full overflow-hidden rounded-xl border border-ink-950/10 sm:aspect-[2.2/1]"
-        style={{ background: '#fbfbfc' }}
-      >
+      {/* ════════ 图表舞台(宽幅画布 + 四角 HUD 角括号) ════════ */}
+      <div className="wi-frame relative mt-1">
+        <div
+          ref={boxRef}
+          className="relative aspect-[16/9] w-full overflow-hidden rounded-md border border-ink-950/12 bg-[#fbfbfc] sm:aspect-[2.2/1]"
+        >
         <canvas
           ref={canvasRef}
           className="block h-full w-full"
@@ -502,7 +606,7 @@ export default function ReplayExperience({
         <button
           type="button"
           aria-label={playing ? t.pause : t.play}
-          className="absolute inset-0 h-full w-full cursor-pointer"
+          className="absolute inset-0 h-full w-full cursor-pointer touch-manipulation"
           onClick={() => {
             if (tRef.current >= 1) restart();
             else setPlaying((p) => !p);
@@ -511,44 +615,44 @@ export default function ReplayExperience({
 
         {/* ════════ 终局结算战报: 背景压暗 + 弹簧卡 ════════ */}
         {stats && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/60 p-4 backdrop-blur-sm">
-            <div className="wi-pop w-full max-w-md rounded-3xl border border-ink-950/10 bg-white/95 p-7 text-center shadow-2xl">
-              <div className="mx-auto inline-flex rounded-full border border-ink-950/15 px-4 py-1 font-mono text-[11px] uppercase tracking-[0.25em] text-ink-950/50">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 p-4 backdrop-blur-sm">
+            <div className="wi-pop w-full max-w-md rounded-lg border border-ink-950/12 bg-white/95 p-7 text-center shadow-[0_24px_64px_-24px_rgba(17,17,20,0.35)]" role="status">
+              <div className="mx-auto inline-flex rounded-[4px] border border-ink-950/15 bg-ink-950/[0.03] px-4 py-1 font-mono text-[11px] uppercase tracking-[0.25em] text-ink-950/50">
                 {t.finalReturn}
               </div>
               <div
                 className="mt-4 font-mono text-6xl font-black tabular-nums sm:text-7xl"
                 style={{ color: stats.returnPct >= 0 ? UP : DOWN }}
               >
-                <CountUp target={stats.returnPct} format={pct} />
+                <CountUp target={stats.returnPct} format={pct} reduced={reduced} />
               </div>
               <p className="mt-3 text-sm text-ink-950/60">
                 {t.finalAssets}{' '}
                 <span className="font-bold text-ink-950">
-                  <CountUp target={stats.finalValue} format={(v) => money(v, locale)} duration={1300} />
+                  <CountUp target={stats.finalValue} format={(v) => money(v, locale, stock.ccy)} duration={1300} reduced={reduced} />
                 </span>
                 （{stats.profit >= 0 ? t.profit : t.loss}{' '}
                 <span
                   className="font-bold"
                   style={{ color: stats.profit >= 0 ? UP : DOWN }}
                 >
-                  {profit(stats.profit, locale)}
+                  {profit(stats.profit, locale, stock.ccy)}
                 </span>
                 ）
               </p>
               {stats.invested != null && (
                 <p className="mt-1 text-xs text-ink-950/50">
-                  {t.invested} {money(stats.invested, locale)}
+                  {t.invested} {money(stats.invested, locale, stock.ccy)}
                   {lumpFinal != null && (
                     <>
                       {' · '}
                       {locale === 'zh' ? '同期一次性' : 'Lump sum'}{' '}
-                      <span className="font-mono">{money(lumpFinal, locale)}</span>
+                      <span className="font-mono">{money(lumpFinal, locale, stock.ccy)}</span>
                     </>
                   )}
                 </p>
               )}
-              <p className="mt-1 font-mono text-[11px] text-ink-950/40">
+              <p className="mt-1 font-mono text-[11px] text-ink-950/50">
                 {t.statsLine(
                   Number(stats.years.toFixed(1)),
                   Number((stats.cagr * 100).toFixed(1)),
@@ -560,25 +664,32 @@ export default function ReplayExperience({
                   type="button"
                   onClick={shareImage}
                   disabled={shareBusy}
-                  className="wi-rise whitespace-nowrap rounded-xl bg-ink-950 px-2 py-2.5 text-sm font-semibold text-white transition hover:bg-gain active:scale-95 disabled:opacity-50"
+                  aria-label={shareBusy ? t.generating : posterMsg === 'fail' ? t.posterFail : t.genPoster}
+                  className={`wi-rise whitespace-nowrap rounded-md px-2 py-2.5 text-sm font-semibold transition active:scale-95 disabled:opacity-50 ${
+                    posterMsg === 'fail'
+                      ? 'border border-gain/50 bg-white text-gain'
+                      : posterMsg === 'ok'
+                        ? 'border border-dca/50 bg-white text-dca'
+                        : 'bg-ink-950 text-white hover:bg-ink-800'
+                  }`}
                 >
-                  {shareBusy ? t.generating : t.genPoster}
+                  {shareBusy ? t.generating : posterMsg === 'ok' ? t.posterDone : posterMsg === 'fail' ? t.posterFail : t.genPoster}
                 </button>
                 {videoSupported && (
                   <button
                     type="button"
                     onClick={exportVideo}
-                    disabled={videoPct != null}
-                    className="wi-rise whitespace-nowrap rounded-xl border border-ink-950/15 px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/30 active:scale-95 disabled:opacity-50"
+                    aria-label={videoPct != null ? `${t.exporting(videoPct)} · ${t.cancelExport}` : t.exportVideo}
+                    className="wi-rise whitespace-nowrap rounded-md border border-ink-950/15 bg-white px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/35 active:scale-95"
                     style={{ animationDelay: '60ms' }}
                   >
-                    {videoPct != null ? t.exporting(videoPct) : t.exportVideo}
+                    {videoPct != null ? `${videoPct}% · ${t.cancelExport}` : t.exportVideo}
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={shareLink}
-                  className="wi-rise whitespace-nowrap rounded-xl border border-ink-950/15 px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/30 active:scale-95"
+                  className="wi-rise whitespace-nowrap rounded-md border border-ink-950/15 bg-white px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/35 active:scale-95"
                   style={{ animationDelay: '120ms' }}
                 >
                   {copied ? t.copied : t.copyLink}
@@ -586,7 +697,7 @@ export default function ReplayExperience({
                 <button
                   type="button"
                   onClick={restart}
-                  className="wi-rise whitespace-nowrap rounded-xl border border-ink-950/15 px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/30 active:scale-95"
+                  className="wi-rise whitespace-nowrap rounded-md border border-ink-950/15 bg-white px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/35 active:scale-95"
                   style={{ animationDelay: '180ms' }}
                 >
                   {t.replayAgain}
@@ -595,6 +706,7 @@ export default function ReplayExperience({
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* ════════ 行情走马灯 ════════ */}
@@ -602,21 +714,21 @@ export default function ReplayExperience({
 
       {/* ════════ 底部状态信息 ════════ */}
       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-        <span className="text-ink-950/35">{t.simNote}</span>
-        <span ref={priceRef} className="font-mono text-ink-950/35 tabular-nums">
+        <span className="text-ink-950/45">{t.simNote}</span>
+        <span ref={priceRef} className="font-mono text-ink-950/45 tabular-nums">
           {t.buyPriceNowPrice(
-            usdPrice(series.rawCloses?.[input.start] ?? null),
-            usdPrice(series.rawCloses?.[input.start] ?? null)
+            fmtPrice(series.rawCloses?.[input.start] ?? null, stock.ccy),
+            fmtPrice(series.rawCloses?.[input.start] ?? null, stock.ccy)
           )}
         </span>
       </div>
 
-      {/* ════════ 播放控制 ════════ */}
+      {/* ════════ 播放控制(时间轴控制台) ════════ */}
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"
           onClick={() => (tRef.current >= 1 ? restart() : setPlaying((p) => !p))}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink-950/[0.06] text-ink-950 transition hover:bg-ink-950/[0.12] active:scale-95"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-ink-950/12 bg-white text-ink-950 transition hover:border-ink-950/40 active:scale-95"
           aria-label={playing ? t.pause : t.play}
         >
           {tRef.current >= 1 || !playing ? (
@@ -638,18 +750,26 @@ export default function ReplayExperience({
           step={0.001}
           defaultValue={0}
           onChange={(e) => scrub(Number(e.target.value))}
-          className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-ink-950/15"
+          onPointerDown={scrubStart}
+          onPointerUp={scrubEnd}
+          onTouchStart={scrubStart}
+          onTouchEnd={scrubEnd}
+          className="wi-range flex-1 cursor-pointer touch-manipulation"
           aria-label={t.progressAria}
         />
-        <div className="flex shrink-0 overflow-hidden rounded-full border border-ink-950/15" role="group" aria-label={t.speedGroup}>
+        <div
+          className="flex shrink-0 overflow-hidden rounded-md border border-ink-950/15 bg-white"
+          role="group"
+          aria-label={t.speedGroup}
+        >
           {SPEEDS.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => setSpeed(s)}
               aria-pressed={speed === s}
-              className={`px-2.5 py-1 text-xs font-semibold transition ${
-                speed === s ? 'bg-ink-950/10 text-ink-950' : 'text-ink-950/50 hover:text-ink-950/80'
+              className={`border-r border-ink-950/10 px-2.5 py-1 font-mono text-xs font-semibold transition last:border-r-0 ${
+                speed === s ? 'bg-ink-950 text-white' : 'text-ink-950/50 hover:text-ink-950/80'
               }`}
             >
               {s}x
@@ -659,7 +779,7 @@ export default function ReplayExperience({
         <button
           type="button"
           onClick={restart}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink-950/[0.06] text-ink-950 transition hover:bg-ink-950/[0.12] active:scale-95"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-ink-950/12 bg-white text-ink-950 transition hover:border-ink-950/40 active:scale-95"
           aria-label={t.replayBtn}
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -668,7 +788,7 @@ export default function ReplayExperience({
           </svg>
         </button>
       </div>
-      <p className="mt-2 text-center text-[10px] text-ink-950/25">{t.kbdHint}</p>
+      <p className="mt-2 text-center text-[10px] text-ink-950/35">{t.kbdHint}</p>
     </div>
   );
 }

@@ -3,8 +3,9 @@
  * 纯 canvas 渲染, 输出 Blob; 货币与文案表达随语言切换(中文 万/亿 ↔ 英文 $K/M/B)
  */
 import { computeStats, dcaSeries, type ReplayInput, type ReplayStats } from '@/lib/engine';
-import { dateISO, moneyEn, moneyZh, multiple, pct, usdPrice } from '@/lib/format';
+import { dateISO, fmtPrice, moneyEn, moneyZh, multiple, pct } from '@/lib/format';
 import type { Locale } from '@/lib/i18n';
+import { GAIN, LOSS } from '@/lib/tokens';
 import type { StockMeta } from '@/lib/stocks';
 
 const SANS = '"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
@@ -57,31 +58,62 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
   const { stock, input } = opts;
   const locale: Locale = opts.locale ?? 'zh';
   const c = COPY[locale];
-  const money = locale === 'en' ? moneyEn : moneyZh;
+  const money = locale === 'en' ? (v: number) => moneyEn(v, stock.ccy) : moneyZh;
   const stockName = locale === 'zh' ? stock.zh : stock.en;
   const stats = opts.stats ?? computeStats(input);
   const year = input.dates[input.start].slice(0, 4);
   const up = stats.returnPct >= 0;
-  const accent = up ? '#D42B3A' : '#0E9F76';
+  const accent = up ? GAIN : LOSS;
 
   const cv = document.createElement('canvas');
   cv.width = W;
   cv.height = H;
   const ctx = cv.getContext('2d')!;
 
-  // 背景
-  const bg = ctx.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, '#ffffff');
-  bg.addColorStop(1, '#f4f4f6');
-  ctx.fillStyle = bg;
+  // 背景: 纯白 + 蓝图点阵(与网页 Terminal Minimal 视觉系统同语言)
+  ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, W, H);
-  const glow = ctx.createRadialGradient(W / 2, H * 0.3, 100, W / 2, H * 0.35, 700);
-  glow.addColorStop(0, up ? 'rgba(212,43,58,0.10)' : 'rgba(14,159,118,0.10)');
-  glow.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, W, H);
+  {
+    const T = 44;
+    const tile = document.createElement('canvas');
+    tile.width = T;
+    tile.height = T;
+    const tctx = tile.getContext('2d')!;
+    tctx.fillStyle = 'rgba(17,17,20,0.06)';
+    tctx.beginPath();
+    tctx.arc(1.5, 1.5, 1.5, 0, Math.PI * 2);
+    tctx.fill();
+    ctx.fillStyle = ctx.createPattern(tile, 'repeat')!;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   const P = 84;
+
+  // 四角 HUD 角括号(对角一对) + 底部分隔细线
+  const BR = 40;
+  const BM = 46;
+  ctx.strokeStyle = 'rgba(17,17,20,0.4)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(BM, BM + BR);
+  ctx.lineTo(BM, BM);
+  ctx.lineTo(BM + BR, BM);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(W - BM - BR, H - BM);
+  ctx.lineTo(W - BM, H - BM);
+  ctx.lineTo(W - BM, H - BM - BR);
+  ctx.stroke();
+
+  // 顶部状态行(仪表报告语言)
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  const spacedCtx = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
+  spacedCtx.letterSpacing = '6px';
+  ctx.font = `600 21px ${MONO}`;
+  ctx.fillStyle = 'rgba(17,17,20,0.42)';
+  ctx.fillText(locale === 'en' ? 'WHATIF // SIMULATION REPORT' : 'WHATIF // 回测模拟报告', P, P - 36);
+  spacedCtx.letterSpacing = '0px';
 
   // 标题(与回放页一致)
   ctx.textBaseline = 'top';
@@ -111,13 +143,10 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
     ctx.fillText(`${c.invested} ${money(stats.invested)}`, P, P + 224);
   }
 
-  // 巨幅结果
+  // 巨幅结果(去辉光, 等宽数字的重量感本身就是视觉主角)
   ctx.font = `800 150px ${MONO}`;
   ctx.fillStyle = accent;
-  ctx.shadowColor = up ? 'rgba(212,43,58,0.3)' : 'rgba(14,159,118,0.28)';
-  ctx.shadowBlur = 28;
   ctx.fillText(money(stats.finalValue), P, H * 0.33);
-  ctx.shadowBlur = 0;
 
   // 指标行
   ctx.font = `700 48px ${MONO}`;
@@ -150,20 +179,31 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
   const step = Math.max(1, Math.floor(nPts / 1200));
   const xOf = (j: number) => P + (j / nPts) * cW;
   const yOf = (v: number) => cBottom - ((v - mn) / (mx - mn)) * (cBottom - cTop);
-  ctx.beginPath();
-  for (let j = 0; j <= nPts; j += step) {
-    const x = xOf(j);
-    const y = yOf(vs[j]);
-    j === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  }
-  ctx.lineTo(xOf(nPts), yOf(vs[nPts]));
+  const drawPath = () => {
+    ctx.beginPath();
+    for (let j = 0; j <= nPts; j += step) {
+      const x = xOf(j);
+      const y = yOf(vs[j]);
+      j === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.lineTo(xOf(nPts), yOf(vs[nPts]));
+  };
+  // 淡渐变面积(与回放图表同语言)
+  drawPath();
+  const area = ctx.createLinearGradient(0, cTop, 0, cBottom);
+  area.addColorStop(0, up ? 'rgba(212,43,58,0.13)' : 'rgba(14,159,118,0.13)');
+  area.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.lineTo(xOf(nPts), cBottom);
+  ctx.lineTo(P, cBottom);
+  ctx.closePath();
+  ctx.fillStyle = area;
+  ctx.fill();
+  // 精密单层描边
+  drawPath();
   ctx.strokeStyle = accent;
-  ctx.lineWidth = 5;
+  ctx.lineWidth = 4.5;
   ctx.lineJoin = 'round';
-  ctx.shadowColor = up ? 'rgba(212,43,58,0.32)' : 'rgba(14,159,118,0.3)';
-  ctx.shadowBlur = 14;
   ctx.stroke();
-  ctx.shadowBlur = 0;
 
   // 端点日期 + 价格(不复权真实价)
   ctx.font = `400 28px ${MONO}`;
@@ -176,13 +216,19 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(17,17,20,0.3)';
     ctx.fillText(
-      `${c.bought} ${usdPrice(opts.rawCloses[input.start])} → ${c.now} ${usdPrice(opts.rawCloses[input.end])}`,
+      `${c.bought} ${fmtPrice(opts.rawCloses[input.start], stock.ccy)} → ${c.now} ${fmtPrice(opts.rawCloses[input.end], stock.ccy)}`,
       W / 2,
       cBottom + 66
     );
   }
 
-  // 底部品牌: 左名称+免责, 右域名
+  // 底部品牌: 细分隔线 + 左名称+免责, 右域名
+  ctx.strokeStyle = 'rgba(17,17,20,0.14)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(P, H - 140);
+  ctx.lineTo(W - P, H - 140);
+  ctx.stroke();
   ctx.textAlign = 'left';
   ctx.font = `800 42px ${SANS}`;
   ctx.fillStyle = '#111114';

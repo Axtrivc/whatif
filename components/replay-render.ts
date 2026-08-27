@@ -1,11 +1,11 @@
 /**
  * 回放图表渲染器 — 纯函数 drawFrame(全历史累计展开版)
  *
- * canvas 只负责图表本体:
+ * canvas 只负责图表本体(Terminal Minimal 精密仪器语言):
  *   左侧 Y 轴自适应刻度(弹性平滑) / 底部 X 轴时间刻度(当前日期高亮框) /
- *   全历史折线(从起点到当前时刻逐渐展开, 旧数据保留在左侧) + 渐变面积 /
- *   前沿呼吸光标(径向大光晕 + 脉冲环) + 左侧跟随资产大字(发光无框) /
- *   垂直参考虚线 / 盈亏状态色(红↔青绿)无缝渐变 / 右下水印(安全区间距)
+ *   全历史折线(从起点到当前时刻逐渐展开, 旧数据保留在左侧) + 淡渐变面积 /
+ *   蓝图虚线网格(横=Y 档, 纵=时间刻度) / 前沿准星光标(reticle + 脉冲环) /
+ *   跟随资产读数芯片(与日期框同语言) / 盈亏状态色(红↔青绿)无缝渐变 / 右下水印
  *
  * 标题/战报/终局卡等 chrome 全部由 DOM 承担(见 ReplayExperience)。
  *
@@ -33,14 +33,15 @@ export interface ChartOpts {
   watermark?: string;
   reduced?: boolean; // prefers-reduced-motion: 关闭脉冲环/里程碑闪光
   locale?: 'zh' | 'en'; // 金额格式: 万/亿 ↔ $K/M/B
+  ccy?: string; // 英文金额币种前缀(缺省 USD; zh 为万/亿中性)
   /** 对比曲线(定投页叠加一次性买入): 与主序列同长, 绝对资产值同坐标系 */
   compareSeries?: Float64Array;
 }
 
 const MONO = 'ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace';
-const SANS = '"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
-const RED: [number, number, number] = [210, 43, 58]; // #D42B3A 盈(白底可读暖红)
-const CYAN: [number, number, number] = [14, 159, 118]; // #0E9F76 亏(白底可读青绿)
+import { GAIN, LOSS, hexToRgb } from '@/lib/tokens';
+const RED = hexToRgb(GAIN);
+const CYAN = hexToRgb(LOSS);
 
 /**
  * ── 帧内热路径预计算(按 input 身份缓存一次) ──
@@ -116,7 +117,7 @@ function mixColor(f: number, alpha = 1): string {
 
 export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const { w, h, dpr, t, ts, input, smooth } = o;
-  const money = o.locale === 'en' ? moneyEn : moneyZh;
+  const money = o.locale === 'en' ? (v: number) => moneyEn(v, o.ccy) : moneyZh;
   const locale = o.locale ?? 'zh';
   ctx.save();
   ctx.scale(dpr, dpr);
@@ -192,7 +193,6 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   smooth.f = smooth.f == null ? targetF : smooth.f + (targetF - smooth.f) * damp(0.07);
   const f = smooth.f;
   const lineColor = mixColor(f);
-  const glowColor = mixColor(f, 0.55);
 
   // ── 布局: 左刻度槽 + 绘图区(右侧留白带, 光点不贴边) + 底部刻度带 ──
   const gutter = Math.round(Math.min(Math.max(w * 0.075, 46), 64));
@@ -209,21 +209,29 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const xOf = (j: number) => xOfTs(p.ts[j]);
   const yOf = (v: number) => plotB - ((v - lo) / (hi - lo)) * plotH;
 
-  // ── Y 轴刻度(左侧, 左对齐, 6 档) + 横向网格 + 左竖轴线 ──
+  // ── Y 轴刻度(左侧, 左对齐, 6 档) + 蓝图虚线网格 + 左竖轴线 ──
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   ctx.font = `500 11px ${MONO}`;
+  let lastGLabel = '';
   for (let g = 0; g <= 5; g++) {
     const gv = lo + ((hi - lo) * g) / 5;
     const gy = yOf(gv);
-    ctx.strokeStyle = 'rgba(17,17,20,0.06)';
+    ctx.setLineDash([2, 4]);
+    ctx.strokeStyle = 'rgba(17,17,20,0.09)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(plotL, gy);
     ctx.lineTo(plotR, gy);
     ctx.stroke();
-    ctx.fillStyle = 'rgba(17,17,20,0.42)';
-    ctx.fillText(money(gv), 8, gy);
+    ctx.setLineDash([]);
+    const gLabel = money(gv);
+    if (gLabel !== lastGLabel) {
+      // 窄 y 域下相邻档位可能舍入成同一文本, 重复标签跳过(网格线照画)
+      ctx.fillStyle = 'rgba(17,17,20,0.42)';
+      ctx.fillText(gLabel, 8, gy);
+      lastGLabel = gLabel;
+    }
   }
   ctx.strokeStyle = 'rgba(17,17,20,0.14)';
   ctx.beginPath();
@@ -231,9 +239,11 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.lineTo(plotL + 0.5, plotB);
   ctx.stroke();
 
-  // ── 对比模式图例(右上角, 两行: 主线/对比线) ──
+  // ── 对比模式图例(右上角, 白底背板防止压在网格/曲线上) ──
   if (cmp) {
     const lx = plotR - 8;
+    ctx.fillStyle = 'rgba(255,255,255,0.82)';
+    ctx.fillRect(plotR - 108, plotT + 2, 116, 38);
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.font = `500 11px ${MONO}`;
@@ -283,6 +293,15 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     if (x < plotL + 20 || x > plotR - 20) continue;
     if (placedXs.length && x - placedXs[placedXs.length - 1] < 50) continue;
     const label = `${y}-${String(m).padStart(2, '0')}`;
+    // 纵向时间网格线(与刻度对齐, 蓝图虚线, 垫在曲线之下)
+    ctx.strokeStyle = 'rgba(17,17,20,0.055)';
+    ctx.setLineDash([2, 5]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, plotT);
+    ctx.lineTo(x + 0.5, plotB);
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(17,17,20,0.36)';
     ctx.fillText(label, x, h - 10);
     placedXs.push(x);
@@ -315,7 +334,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.setLineDash([]);
   }
   const area = ctx.createLinearGradient(0, plotT, 0, plotB);
-  area.addColorStop(0, mixColor(f, 0.3));
+  area.addColorStop(0, mixColor(f, 0.18));
   area.addColorStop(1, 'rgba(255,255,255,0)');
   drawPath();
   ctx.lineTo(headX, plotB);
@@ -323,21 +342,13 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.closePath();
   ctx.fillStyle = area;
   ctx.fill();
-  // 霓虹双层描边: 宽晕底层 + 亮芯上层
+  // 精密单层描边(去霓虹光晕): 一根 crisp 主线
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   drawPath();
-  ctx.strokeStyle = mixColor(f, 0.32);
-  ctx.lineWidth = 7;
-  ctx.shadowColor = glowColor;
-  ctx.shadowBlur = 10;
-  ctx.stroke();
-  drawPath();
   ctx.strokeStyle = lineColor;
-  ctx.lineWidth = 3;
-  ctx.shadowBlur = 6;
+  ctx.lineWidth = 2.75;
   ctx.stroke();
-  ctx.shadowBlur = 0;
   ctx.restore();
 
   // 前沿坐标(小数插值点)
@@ -346,82 +357,71 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
 
   // ── 垂直参考虚线(贯穿到底部高亮框) ──
   ctx.setLineDash([3, 4]);
-  ctx.strokeStyle = mixColor(f, 0.5);
+  ctx.strokeStyle = mixColor(f, 0.45);
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(cx, cy + 8);
+  ctx.moveTo(cx, cy + 12);
   ctx.lineTo(cx, plotB);
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // ── 前沿径向大光晕 ──
-  const halo = ctx.createRadialGradient(cx, cy, 1, cx, cy, 26);
-  halo.addColorStop(0, mixColor(f, 0.5));
+  // ── 微弱径向衬光(读数焦点提示, 幅度收敛) ──
+  const halo = ctx.createRadialGradient(cx, cy, 1, cx, cy, 14);
+  halo.addColorStop(0, mixColor(f, 0.32));
   halo.addColorStop(1, mixColor(f, 0));
   ctx.beginPath();
-  ctx.arc(cx, cy, 26, 0, Math.PI * 2);
+  ctx.arc(cx, cy, 14, 0, Math.PI * 2);
   ctx.fillStyle = halo;
   ctx.fill();
 
-  // ── 呼吸光标: 扩散脉冲环(reduced-motion 下跳过) ──
+  // ── 呼吸脉冲环(reduced-motion 下跳过) ──
   if (!o.reduced) {
     const pulse = (ts / 1100) % 1;
     ctx.beginPath();
-    ctx.arc(cx, cy, 6 + 9 * pulse, 0, Math.PI * 2);
-    ctx.strokeStyle = mixColor(f, 0.55 * (1 - pulse));
-    ctx.lineWidth = 1.5;
+    ctx.arc(cx, cy, 8 + 8 * pulse, 0, Math.PI * 2);
+    ctx.strokeStyle = mixColor(f, 0.5 * (1 - pulse));
+    ctx.lineWidth = 1.25;
     ctx.stroke();
   }
 
-  // ── 里程碑闪光(突破瞬间的一次性扩散亮环, ~0.5s, reduced-motion 下跳过) ──
+  // ── 里程碑闪光(突破瞬间的一次性扩散环, ~0.5s, reduced-motion 下跳过) ──
   if (!o.reduced && smooth.flashTs != null) {
     const ft = (ts - smooth.flashTs) / 480;
     if (ft >= 0 && ft < 1) {
       ctx.beginPath();
-      ctx.arc(cx, cy, 7 + 26 * ft, 0, Math.PI * 2);
-      ctx.strokeStyle = mixColor(f, 0.85 * (1 - ft));
-      ctx.lineWidth = 2.5 - 1.5 * ft;
+      ctx.arc(cx, cy, 8 + 24 * ft, 0, Math.PI * 2);
+      ctx.strokeStyle = mixColor(f, 0.8 * (1 - ft));
+      ctx.lineWidth = 2 - 1.2 * ft;
       ctx.stroke();
     }
   }
+
+  // ── 准星光标(crosshair reticle): 外环 + 四向外短刻线 + 芯点 ──
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 1.25;
   ctx.beginPath();
-  ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+  ctx.arc(cx, cy, 9, 0, Math.PI * 2);
+  ctx.stroke();
+  for (const [dx, dy] of [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ] as const) {
+    ctx.beginPath();
+    ctx.moveTo(cx + dx * 11, cy + dy * 11);
+    ctx.lineTo(cx + dx * 16, cy + dy * 16);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3, 0, Math.PI * 2);
   ctx.fillStyle = lineColor;
-  ctx.shadowColor = glowColor;
-  ctx.shadowBlur = 6;
   ctx.fill();
-  ctx.shadowBlur = 0;
   ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.25;
   ctx.stroke();
 
-  // ── 跟随资产大字(光点左侧, 无框发光体; 左侧放不下时移到点上方) ──
-  const label = money(value);
-  const fs = Math.round(Math.min(Math.max(w * 0.034, 20), 34));
-  ctx.font = `800 ${fs}px ${SANS}`;
-  ctx.textBaseline = 'middle';
-  ctx.shadowColor = glowColor;
-  ctx.shadowBlur = 8;
-  ctx.fillStyle = lineColor;
-  const tw = ctx.measureText(label).width;
-  if (cx - 18 - tw > plotL + 4) {
-    ctx.textAlign = 'right';
-    ctx.fillText(label, cx - 18, cy);
-    ctx.fillText(label, cx - 18, cy); // 两遍叠亮
-  } else {
-    ctx.textAlign = 'center';
-    ctx.fillText(label, cx, cy - fs);
-    ctx.fillText(label, cx, cy - fs);
-  }
-  ctx.shadowBlur = 0;
-
-  // ── 当前日期高亮框(底部刻度带, 跟随前沿, 贴右缘不溢出) ──
-  const curLabel = dateYM(input.dates[Math.min(idx, input.end)]);
-  ctx.font = `600 11px ${MONO}`;
-  const cw = ctx.measureText(curLabel).width + 16;
-  const chh = 20;
-  const ccx = Math.min(Math.max(cx, plotL + cw / 2), w - 6 - cw / 2);
-  const ccy = h - 16;
+  // ── 圆角矩形路径辅助(配合 beginPath/fill/stroke 使用) ──
   const rr = (x: number, y: number, w2: number, h2: number, r: number) => {
     ctx.moveTo(x + r, y);
     ctx.arcTo(x + w2, y, x + w2, y + h2, r);
@@ -430,8 +430,44 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.arcTo(x, y, x + w2, y, r);
     ctx.closePath();
   };
+
+  // ── 跟随资产读数芯片(等宽仪表读出, 与底部日期框同语言; 左侧放不下时移到点上方) ──
+  const label = money(value);
+  const fs = Math.round(Math.min(Math.max(w * 0.03, 17), 26));
+  ctx.font = `700 ${fs}px ${MONO}`;
+  ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(label).width;
+  const padX = Math.round(fs * 0.45);
+  const chW = tw + padX * 2;
+  const chH = Math.round(fs * 1.6);
+  let chx = cx - 20 - chW; // 默认: 点左侧, 右缘对齐
+  let chy = cy - chH / 2;
+  if (chx < plotL + 4) {
+    chx = cx - chW / 2; // 放不下 → 点上方居中
+    chy = cy - 18 - chH;
+  }
+  chx = Math.max(plotL + 4, Math.min(chx, plotR - chW - 4)); // 界内不溢出
+  chy = Math.max(plotT + 4, Math.min(chy, plotB - chH - 4));
   ctx.beginPath();
-  rr(ccx - cw / 2, ccy - chh / 2, cw, chh, 6);
+  rr(chx, chy, chW, chH, 4);
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fill();
+  ctx.strokeStyle = mixColor(f, 0.55);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = lineColor;
+  ctx.textAlign = 'center';
+  ctx.fillText(label, chx + chW / 2, chy + chH / 2 + 0.5);
+
+  // ── 当前日期高亮框(底部刻度带, 跟随前沿, 贴右缘不溢出) ──
+  const curLabel = dateYM(input.dates[Math.min(idx, input.end)]);
+  ctx.font = `600 11px ${MONO}`;
+  const cw = ctx.measureText(curLabel).width + 16;
+  const chh = 20;
+  const ccx = Math.min(Math.max(cx, plotL + cw / 2), w - 6 - cw / 2);
+  const ccy = h - 16;
+  ctx.beginPath();
+  rr(ccx - cw / 2, ccy - chh / 2, cw, chh, 4);
   ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.fill();
   ctx.strokeStyle = mixColor(f, 0.75);
@@ -442,13 +478,13 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.fillStyle = lineColor;
   ctx.fillText(curLabel, ccx, ccy + 0.5);
 
-  // ── 右下水印(安全区: 距底部刻度带 ≥20px) ──
+  // ── 水印(左上角: 曲线前沿恒在右侧, 旧数据受 y 域顶约束不会占据左上; 避开右下读数芯片) ──
   if (o.watermark) {
-    ctx.textAlign = 'right';
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.font = `600 11px ${MONO}`;
     ctx.fillStyle = 'rgba(17,17,20,0.22)';
-    ctx.fillText(o.watermark, w - 12, h - 46);
+    ctx.fillText(o.watermark, plotL + 6, plotT + 14);
   }
 
   ctx.restore();

@@ -1,9 +1,10 @@
 import Link from 'next/link';
-import LangSwitch from '@/components/LangSwitch';
+import SiteHeader from '@/components/SiteHeader';
 import { computeStats } from '@/lib/engine';
-import { money, multiple, pct } from '@/lib/format';
+import { moneyEn, moneyZh, multiple, pct } from '@/lib/format';
 import { dict, lp, MARKET_LABEL_I18N, type Locale } from '@/lib/i18n';
 import { loadSeries, STOCKS, STOCK_MAP, type Series, type StockMeta } from '@/lib/stocks';
+import { ccyPrefix } from '@/lib/tokens';
 
 interface Props {
   locale: Locale;
@@ -16,6 +17,18 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
   const name = locale === 'zh' ? meta.zh : meta.en;
   const firstYear = Number(series.first.slice(0, 4));
   const lastYear = new Date().getFullYear() - 1;
+
+  // 标的计价货币: en 金额需带 HK$/¥ 前缀; zh 万/亿单位本身币种中性
+  const prefix = ccyPrefix(meta.ccy);
+  const moneyC = (v: number) => (locale === 'en' ? moneyEn(v, meta.ccy) : moneyZh(v));
+  const principalLabel =
+    locale === 'zh'
+      ? meta.ccy === 'CNY'
+        ? '10 万人民币'
+        : meta.ccy === 'HKD'
+          ? '10 万港元'
+          : '10 万美元'
+      : `${prefix}100K`;
 
   // 面包屑结构化数据(中英各自指向对应语言 URL)
   const homeUrl = `https://whatif.axtrivc.com${locale === 'en' ? '/en/' : '/'}`;
@@ -66,23 +79,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: breadcrumbJsonLd }}
       />
-      <header className="flex items-center justify-between py-6">
-        <Link href={lp(locale, '/')} className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink-950 text-lg font-black text-ink-950">
-            ?
-          </span>
-          <span className="text-base font-extrabold">{t.siteName}</span>
-        </Link>
-        <div className="flex items-center gap-2">
-          <LangSwitch locale={locale} />
-          <Link
-            href={replayHref(firstYear)}
-            className="rounded-full bg-ink-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-ink-900"
-          >
-            {t.watchAnimation}
-          </Link>
-        </div>
-      </header>
+      <SiteHeader locale={locale} ctaHref={replayHref(firstYear)} ctaLabel={t.watchAnimation} />
 
       <h1 className="mt-6 text-3xl font-black leading-snug sm:text-4xl">
         {t.landingTitle(String(firstYear), name, meta.symbol)}
@@ -91,8 +88,8 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
       {hl && (
         <p className="mt-4 font-mono text-lg font-semibold text-gain">
           {t.landingHl(
-            money(100_000, locale),
-            money(hl.stats.finalValue, locale),
+            moneyC(100_000),
+            moneyC(hl.stats.finalValue),
             multiple(hl.stats.multiple),
             pct(hl.stats.returnPct, 0)
           )}
@@ -106,8 +103,9 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
           MARKET_LABEL_I18N[locale][meta.market],
           String(firstYear),
           String(series.last.slice(0, 4)),
-          money(hl?.stats.finalValue ?? 0, locale),
-          Number(((hl?.stats.cagr ?? 0) * 100).toFixed(1))
+          moneyC(hl?.stats.finalValue ?? 0),
+          Number(((hl?.stats.cagr ?? 0) * 100).toFixed(1)),
+          principalLabel
         )}
       </p>
 
@@ -117,10 +115,10 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
           <Link
             key={r.year}
             href={replayHref(r.year)}
-            className={`rounded-full border px-4 py-2 font-mono text-sm transition active:scale-95 ${
+            className={`rounded-md border px-4 py-2 font-mono text-sm transition active:scale-95 ${
               r.year === best.year
                 ? 'border-gain bg-gain font-semibold text-white'
-                : 'border-ink-950/10 bg-black/[0.03] text-ink-950/70 hover:border-gain/50 hover:bg-gain/[0.08] hover:text-gain'
+                : 'border-ink-950/10 bg-white text-ink-950/70 hover:border-gain/50 hover:bg-gain/[0.06] hover:text-gain'
             }`}
           >
             {r.year}
@@ -129,12 +127,12 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
       </section>
 
       {/* 回测表 */}
-      <section className="mt-10 overflow-hidden rounded-2xl border border-ink-950/8">
+      <section className="mt-10 overflow-hidden rounded-lg border border-ink-950/10">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-ink-950/5 text-left text-xs uppercase tracking-wider text-ink-950/40">
               <th className="px-4 py-3 font-semibold">{t.colYear}</th>
-              <th className="px-4 py-3 text-right font-semibold">{t.colResult}</th>
+              <th className="px-4 py-3 text-right font-semibold">{t.colResult(prefix)}</th>
               <th className="px-4 py-3 text-right font-semibold">{t.colMultiple}</th>
               <th className="hidden px-4 py-3 text-right font-semibold sm:table-cell">{t.colCagr}</th>
             </tr>
@@ -149,7 +147,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
                 </td>
                 <td className="px-4 py-3 text-right font-mono">
                   <Link href={replayHref(r.year)} className="hover:text-ink-950">
-                    {money(r.stats.finalValue, locale)}
+                    {moneyC(r.stats.finalValue)}
                   </Link>
                 </td>
                 <td
@@ -168,7 +166,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
         </table>
       </section>
 
-      <p className="mt-6 text-xs leading-6 text-ink-950/40">{t.caliberNote}</p>
+      <p className="mt-6 text-xs leading-6 text-ink-950/50">{t.caliberNote}</p>
 
       {/* 定投 vs 一次性买入对比(真实数据构建期计算): 总投入 10 万的两种买法 */}
       <section className="mt-12">
@@ -201,10 +199,10 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
           ];
           return (
             <>
-              <div className="mt-4 overflow-hidden rounded-2xl border border-ink-950/8">
+          <div className="mt-4 overflow-hidden rounded-lg border border-ink-950/10">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-ink-950/5 text-left text-xs uppercase tracking-wider text-ink-950/40">
+                    <tr className="bg-ink-950/[0.04] text-left font-mono text-[11px] uppercase tracking-[0.14em] text-ink-950/40">
                       <th className="px-4 py-3 font-semibold">{t.dcaColMode}</th>
                       <th className="hidden px-4 py-3 text-right font-semibold sm:table-cell">{t.dcaColInvested}</th>
                       <th className="px-4 py-3 text-right font-semibold">{t.dcaColFinal}</th>
@@ -222,10 +220,10 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
                           )}
                         </td>
                         <td className="hidden px-4 py-3 text-right font-mono text-ink-950/60 sm:table-cell">
-                          {money(r.invested, locale)}
+                          {moneyC(r.invested)}
                         </td>
                         <td className="px-4 py-3 text-right font-mono">
-                          {money(r.s.finalValue, locale)}
+                          {moneyC(r.s.finalValue)}
                         </td>
                         <td
                           className={`px-4 py-3 text-right font-mono font-bold ${
@@ -242,13 +240,13 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
               <div className="mt-4 flex flex-wrap gap-2">
                 <Link
                   href={`${lp(locale, '/replay')}?s=${meta.key}&y=${firstYear}&a=10000&m=dca&monthly=${monthlyAmt}`}
-                  className="inline-flex rounded-full border border-dca/40 px-5 py-2 text-sm font-semibold text-dca transition hover:bg-dca/10 active:scale-95"
+                  className="inline-flex rounded-md border border-dca/40 bg-white px-5 py-2 text-sm font-semibold text-dca transition hover:border-dca hover:bg-dca/[0.08] active:scale-95"
                 >
                   {t.dcaTryIt}
                 </Link>
                 <Link
                   href={`${lp(locale, '/replay')}?s=${meta.key}&y=${firstYear}&a=10000&m=dca&monthly=${monthlyAmt}&compare=1`}
-                  className="inline-flex rounded-full border border-gain/40 px-5 py-2 text-sm font-semibold text-gain transition hover:bg-gain/10 active:scale-95"
+                  className="inline-flex rounded-md border border-gain/40 bg-white px-5 py-2 text-sm font-semibold text-gain transition hover:border-gain hover:bg-gain/[0.06] active:scale-95"
                 >
                   {locale === 'zh' ? '▶ 同屏对比回放' : '▶ Side-by-side Replay'}
                 </Link>
@@ -268,7 +266,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
             <Link
               key={s.key}
               href={lp(locale, `/p/${s.key}`)}
-              className="rounded-full bg-black/5 px-4 py-2 text-sm text-ink-950/70 transition hover:bg-black/10"
+              className="rounded-md bg-ink-950/[0.05] px-4 py-2 text-sm text-ink-950/70 transition hover:bg-ink-950/10"
             >
               {(locale === 'zh' ? s.zh : s.en) || s.en} {s.symbol}
             </Link>
@@ -276,7 +274,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
         </div>
       </section>
 
-      <footer className="mt-16 border-t border-ink-950/8 pt-6 font-mono text-[11px] text-ink-950/30">
+      <footer className="mt-16 border-t border-ink-950/8 pt-6 font-mono text-[11px] text-ink-950/45">
         {t.footerNote}{' '}
         <a href="https://toolhub.axtrivc.com" className="hover:text-ink-950/60">
           toolhub.axtrivc.com

@@ -27,6 +27,7 @@ export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
   const stock = STOCK_MAP[key];
   const [series, setSeries] = useState<Series | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0); // 重试计数: 变更即重新拉取
 
   useEffect(() => {
     if (!stock) {
@@ -36,7 +37,10 @@ export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
     let alive = true;
     setSeries(null);
     setError(null);
-    fetch(`/data/${key}.json`)
+    // 15s 超时兜底: 连接僵死时转入可重试的失败态, 不无限挂在「载入历史数据…」
+    const ctl = new AbortController();
+    const timer = window.setTimeout(() => ctl.abort(), 15_000);
+    fetch(`/data/${key}.json`, { signal: ctl.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -44,31 +48,58 @@ export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
       .then((data: Series) => {
         if (alive) setSeries(data);
       })
-      .catch(() => alive && setError('load'));
+      .catch(() => {
+        // 失败(HTTP/网络/15s 超时)都转入可重试错误态; 组件已卸载时由 alive 拦截
+        if (alive) setError('load');
+      })
+      .finally(() => window.clearTimeout(timer));
     return () => {
       alive = false;
+      window.clearTimeout(timer);
+      ctl.abort();
     };
-  }, [key, stock]);
+  }, [key, stock, attempt]);
 
   const homeHref = locale === 'en' ? '/en/' : '/';
   if (!stock || error) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4">
         <p className="text-ink-950/60">{error === 'load' ? t.loadFailed : t.unknownStock}</p>
-        <Link
-          href={homeHref}
-          className="rounded-full border border-ink-950/15 px-5 py-2 text-sm text-ink-950/70 transition hover:border-ink-950/40 hover:text-ink-950"
-        >
-          {t.backHome}
-        </Link>
+        <div className="flex items-center gap-2">
+          {error === 'load' && (
+            <button
+              type="button"
+              onClick={() => setAttempt((a) => a + 1)}
+              className="rounded-md bg-ink-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-ink-800 active:scale-95"
+            >
+              {t.retry}
+            </button>
+          )}
+          <Link
+            href={homeHref}
+            className="rounded-md border border-ink-950/15 bg-white px-5 py-2 text-sm text-ink-950/70 transition hover:border-ink-950/40 hover:text-ink-950"
+          >
+            {t.backHome}
+          </Link>
+        </div>
       </div>
     );
   }
 
   if (!series) {
+    // 骨架屏与真实舞台同布局同尺寸, 数据到达时零跳动
     return (
-      <div className="flex min-h-dvh items-center justify-center">
-        <div className="animate-pulse font-mono text-sm text-ink-950/40">{t.loadingData}</div>
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-5">
+        <div className="wi-frame relative mt-1">
+          <div className="flex aspect-[16/9] w-full items-center justify-center overflow-hidden rounded-md border border-ink-950/12 bg-[#fbfbfc] sm:aspect-[2.2/1]">
+            <div className="flex flex-col items-center gap-3">
+              <div className="h-1 w-40 overflow-hidden rounded-full bg-ink-950/10">
+                <div className="wi-loading h-full w-1/3 rounded-full bg-ink-950/30" />
+              </div>
+              <div className="font-mono text-sm text-ink-950/40">{t.loadingData}</div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

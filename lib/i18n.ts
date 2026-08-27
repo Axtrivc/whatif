@@ -19,28 +19,29 @@ const zh = {
   brandSub: 'whatif',
   playNow: '直接开玩 →',
 
-  heroTitleA: '假如',
-  heroTitleB: '当时',
-  heroTitleC: '买了…',
   heroSub: '选一只股票、一个年份、一笔本金。',
   heroSub2: '看复利如何把时间变成奇迹 —— 动画逐日回放。',
 
   pickStock: '① 选标的',
   pickYear: '② 选年份',
-  pickAmount: '③ 本金 (USD)',
+  pickAmount: '③ 本金',
   pickModeLump: '一次性买入',
   pickModeDca: '每月定投',
-  pickMonthly: '每月追加 (USD)',
+  pickMonthly: '每月追加',
   customAmount: '自定义金额',
   amountLabel: (a: number) => (a >= 10000 ? `${a / 10000}万` : String(a)),
   startReplay: '开始穿越 ▶',
-  replaySummary: (year: number, amount: string) =>
-    `${year} 年投入 ${amount} · 一直持有到今天`,  dataMissing: '数据文件缺失，请先运行',
+  replaySummary: (year: number, amount: string, _ccyPrefix: string) =>
+    `${year} 年投入 ${amount} · 一直持有到今天`,
+  dataMissing: '数据文件缺失，请先运行',
   yearAria: '年份',
   customAmountAria: '自定义本金金额（美元）',
 
   hotPicks: '热门穿越 · 真实数据',
   allAssets: '全部标的',
+  trustAssets: '标的覆盖',
+  trustSince: '数据自',
+  trustSpan: '年跨度',
   presetPrincipal: '本金',
   yearsLater: (y: number) => `年后`,
   presetDcaTag: '定投',
@@ -58,6 +59,7 @@ const zh = {
   backHome: '返回首页',
   unknownStock: '未知标的',
   loadFailed: '数据加载失败, 请刷新重试',
+  retry: '重试',
   loadingData: '载入历史数据…',
 
   back: '返回',
@@ -79,8 +81,11 @@ const zh = {
     `${years} 年 · 年化 ${cagr}% · 最大回撤 ${mdd}%`,
   genPoster: '生成分享海报',
   generating: '生成中…',
+  posterDone: '已生成 ✓',
+  posterFail: '生成失败 · 点重试',
   exportVideo: '导出视频',
   exporting: (p: number) => `导出中 ${p}%`,
+  cancelExport: '取消',
   copyLink: '复制战报链接',
   copied: '已复制 ✓',
   replayAgain: '再测一次',
@@ -90,7 +95,7 @@ const zh = {
   progressAria: '进度',
   speedGroup: '播放速度',
   replayBtn: '重播',
-  kbdHint: '空格 播放/暂停 · ← → 快退/快进 5 秒 · R 重播',
+  kbdHint: '空格 播放/暂停 · ← → 快退/快进 5 秒 · 1/2/4 倍速 · R 重播',
   canvasAria: (name: string, year: number) => `${name} ${year} 年买入后逐日持有的资产曲线动画`,
 
   // 落地页 /p/[stock]
@@ -105,12 +110,13 @@ const zh = {
     firstYear: string,
     lastYear: string,
     final: string,
-    cagr: number
+    cagr: number,
+    principal: string
   ) =>
-    `${name}（${en}，${market}）的数据可以追溯到 ${firstYear} 年。如果从上市初期投入 10 万美元、一直持有并让分红再投资（后复权口径），到 ${lastYear} 年将变成 ${final}，年化收益 ${cagr}%。点击任意年份，用动画回放这趟复利之旅。`,
+    `${name}（${en}，${market}）的数据可以追溯到 ${firstYear} 年。如果从上市初期投入 ${principal}、一直持有并让分红再投资（后复权口径），到 ${lastYear} 年将变成 ${final}，年化收益 ${cagr}%。点击任意年份，用动画回放这趟复利之旅。`,
   watchAnimation: '▶ 看动画',
   colYear: '买入年份',
-  colResult: '10万 →',
+  colResult: (ccyPrefix: string) => `10万 →`, // zh 金额单位币种中性
   colMultiple: '倍数',
   colCagr: '年化',
   caliberNote:
@@ -125,12 +131,9 @@ const zh = {
   dcaModeLump: '一次性买入',
   dcaModeDca: '每月定投',
   dcaTryIt: '▶ 看定投回放',
-  notFoundText: '这个「假如」不存在 —— 也许历史里根本没有那一天。',
-  goHome: '回首页',
-  tryMsft1996: '直接看微软 1996',
 
   footerNote: '© 2026 whatif.axtrivc.com · 姊妹站',
-  switchTo: 'English',
+  dataAsOf: (d: string) => `数据截至 ${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`,
 };
 
 export type Dict = typeof zh;
@@ -140,29 +143,29 @@ const en: Dict = {
   brandSub: 'whatif',
   playNow: 'Play Now →',
 
-  heroTitleA: 'What if you had bought ',
-  heroTitleB: 'back then',
-  heroTitleC: '?',
   heroSub: 'Pick a stock, a year, and an amount.',
   heroSub2: 'Watch compound interest turn time into a miracle — day by day.',
 
   pickStock: '① Pick an asset',
   pickYear: '② Pick a year',
-  pickAmount: '③ Principal (USD)',
+  pickAmount: '③ Principal',
   pickModeLump: 'Lump sum',
   pickModeDca: 'Monthly DCA',
-  pickMonthly: 'Monthly top-up (USD)',
+  pickMonthly: 'Monthly top-up',
   customAmount: 'Custom amount',
   amountLabel: (a: number) => (a >= 1e6 ? `${a / 1e6}M` : a >= 10000 ? `${a / 1000}K` : String(a)),
   startReplay: 'Start Replay ▶',
-  replaySummary: (year: number, amount: string) =>
-    `Invested $${amount} in ${year} · held until today`,
+  replaySummary: (year: number, amount: string, ccyPrefix: string) =>
+    `Invested ${ccyPrefix}${amount} in ${year} · held until today`,
   dataMissing: 'Data files missing. Run',
   yearAria: 'Year',
   customAmountAria: 'Custom principal amount (USD)',
 
   hotPicks: 'Popular Journeys · Real Data',
   allAssets: 'All assets',
+  trustAssets: 'Assets',
+  trustSince: 'Data from',
+  trustSpan: 'Years spanned',
   presetPrincipal: 'Principal',
   yearsLater: () => `years later`,
   presetDcaTag: 'DCA',
@@ -180,6 +183,7 @@ const en: Dict = {
   backHome: 'Back home',
   unknownStock: 'Unknown asset',
   loadFailed: 'Failed to load data, please refresh',
+  retry: 'Retry',
   loadingData: 'Loading history…',
 
   back: 'Back',
@@ -201,8 +205,11 @@ const en: Dict = {
     `${years} yrs · CAGR ${cagr}% · Max drawdown ${mdd}%`,
   genPoster: 'Share Card',
   generating: 'Rendering…',
+  posterDone: 'Saved ✓',
+  posterFail: 'Failed · tap to retry',
   exportVideo: 'Export Video',
   exporting: (p: number) => `Exporting ${p}%`,
+  cancelExport: 'Cancel',
   copyLink: 'Copy Link',
   copied: 'Copied ✓',
   replayAgain: 'Run Again',
@@ -212,7 +219,7 @@ const en: Dict = {
   progressAria: 'Progress',
   speedGroup: 'Playback speed',
   replayBtn: 'Restart',
-  kbdHint: 'Space play/pause · ← → seek ±5s · R restart',
+  kbdHint: 'Space play/pause · ← → seek ±5s · 1/2/4 speed · R restart',
   canvasAria: (name: string, year: number) =>
     `Animated daily asset curve after buying ${name} in ${year}`,
 
@@ -227,12 +234,13 @@ const en: Dict = {
     firstYear: string,
     lastYear: string,
     final: string,
-    cagr: number
+    cagr: number,
+    principal: string
   ) =>
-    `Data for ${en} (${market}) goes back to ${firstYear}. Invest $100K at launch and hold with dividends reinvested (total-return basis): by ${lastYear} it grows to ${final}, a ${cagr}% annualized return. Click any year to replay this compounding journey.`,
+    `Data for ${en} (${market}) goes back to ${firstYear}. Invest ${principal} at launch and hold with dividends reinvested (total-return basis): by ${lastYear} it grows to ${final}, a ${cagr}% annualized return. Click any year to replay this compounding journey.`,
   watchAnimation: '▶ Watch Replay',
   colYear: 'Buy year',
-  colResult: '$100K →',
+  colResult: (ccyPrefix: string) => `${ccyPrefix}100K →`,
   colMultiple: 'Multiple',
   colCagr: 'CAGR',
   caliberNote:
@@ -247,12 +255,9 @@ const en: Dict = {
   dcaModeLump: 'Lump sum',
   dcaModeDca: 'Monthly DCA',
   dcaTryIt: '▶ Watch DCA Replay',
-  notFoundText: 'This "what if" doesn\'t exist — maybe that day never happened.',
-  goHome: 'Home',
-  tryMsft1996: 'Microsoft 1996 replay',
 
   footerNote: '© 2026 whatif.axtrivc.com · Sister site',
-  switchTo: '中文',
+  dataAsOf: (d: string) => `Data as of ${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`,
 };
 
 export function dict(locale: Locale): Dict {
@@ -271,6 +276,18 @@ export const TAGLINE_EN: Record<string, string> = {
   brkb: "Buffett's compounding machine",
   ko: "Buffett's favorite",
   dis: "Mickey Mouse's century-old fairy tale",
+  tsm: 'The foundry the whole world depends on',
+  nflx: 'The company that killed the video-rental store',
+  amd: 'Nearly bankrupt — then came the comeback',
+  cost: 'A moat built out of membership fees',
+  orcl: "The database veteran's AI second act",
+  mcd: 'Compound interest, one burger at a time',
+  intc: 'The giant that missed its era (a cautionary tale)',
+  pypl: 'The former king of payments (a cautionary tale)',
+  ba: 'A rough decade for an aviation icon',
+  qqq: 'A basket of tech giants (ETF)',
+  tencent: 'The social-and-games money machine',
+  moutai: 'The hardest liquor on A-shares',
   spx: 'The lazy benchmark: just buy the index',
   gold: 'The hard asset across cycles (ETF)',
   btc: '$10.9 in 2011 — what about today?',
@@ -283,6 +300,8 @@ export const MARKET_LABEL_I18N: Record<Locale, Record<StockMarket, string>> = {
     index: '指数',
     gold: '商品',
     crypto: '加密货币',
+    hk: '港交所',
+    ashare: 'A 股',
   },
   en: {
     nasdaq: 'Nasdaq',
@@ -290,7 +309,9 @@ export const MARKET_LABEL_I18N: Record<Locale, Record<StockMarket, string>> = {
     index: 'Index',
     gold: 'Commodity',
     crypto: 'Crypto',
+    hk: 'HKEX',
+    ashare: 'A-shares',
   },
 };
 
-type StockMarket = 'nasdaq' | 'nyse' | 'index' | 'gold' | 'crypto';
+type StockMarket = 'nasdaq' | 'nyse' | 'index' | 'gold' | 'crypto' | 'hk' | 'ashare';

@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
+    "test": "node --test",
     "fetch-data": "node scripts/fetch-data.mjs"
   },
   "dependencies": {

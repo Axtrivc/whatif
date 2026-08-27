@@ -17,39 +17,63 @@ import path from 'node:path';
 const API = 'https://push2his.eastmoney.com/api/qt/stock/kline/get';
 const GAP_MS = 5200;
 
-// [key, secid候选(按序尝试), 最小数据点数, 展示代码, 中文名]
+// [key, secid候选(按序尝试), 最小数据点数, 展示代码, 中文名, 计价货币(缺省USD)]
 const CATALOG = [
-  ['msft', ['105.MSFT'], 3000, 'MSFT', '微软'],
-  ['aapl', ['105.AAPL'], 3000, 'AAPL', '苹果'],
-  ['nvda', ['105.NVDA'], 2000, 'NVDA', '英伟达'],
-  ['googl', ['105.GOOGL'], 2000, 'GOOGL', '谷歌'],
-  ['amzn', ['105.AMZN'], 3000, 'AMZN', '亚马逊'],
-  ['tsla', ['105.TSLA'], 2000, 'TSLA', '特斯拉'],
-  ['meta', ['105.META'], 1500, 'META', 'Meta'],
-  ['ko', ['106.KO'], 5000, 'KO', '可口可乐'],
-  ['dis', ['106.DIS'], 5000, 'DIS', '迪士尼'],
-  ['brkb', ['106.BRK_B', '106.BRK_A'], 3000, 'BRK-B', '伯克希尔'],
-  ['spx', ['100.SPX'], 5000, 'SPX', '标普500'],
-  ['gold', ['107.GLD'], 4000, 'GLD', '黄金'],
+  ['msft', ['105.MSFT'], 3000, 'MSFT', '微软', 'USD'],
+  ['aapl', ['105.AAPL'], 3000, 'AAPL', '苹果', 'USD'],
+  ['nvda', ['105.NVDA'], 2000, 'NVDA', '英伟达', 'USD'],
+  ['googl', ['105.GOOGL'], 2000, 'GOOGL', '谷歌', 'USD'],
+  ['amzn', ['105.AMZN'], 3000, 'AMZN', '亚马逊', 'USD'],
+  ['tsla', ['105.TSLA'], 2000, 'TSLA', '特斯拉', 'USD'],
+  ['meta', ['105.META'], 1500, 'META', 'Meta', 'USD'],
+  ['tsm', ['106.TSM'], 4000, 'TSM', '台积电', 'USD'],
+  ['nflx', ['105.NFLX'], 4500, 'NFLX', '奈飞', 'USD'],
+  ['amd', ['105.AMD'], 2800, 'AMD', '超威半导体', 'USD'], // 东财 AMD 仅 2015 起(拆股后), 2927 点
+  ['cost', ['105.COST'], 5500, 'COST', '开市客', 'USD'],
+  ['orcl', ['106.ORCL', '105.ORCL'], 3000, 'ORCL', '甲骨文', 'USD'], // 东财仅 2013 转板 NYSE 起
+  ['mcd', ['106.MCD'], 6000, 'MCD', '麦当劳', 'USD'],
+  ['intc', ['105.INTC'], 5500, 'INTC', '英特尔', 'USD'],
+  ['pypl', ['105.PYPL'], 1500, 'PYPL', 'PayPal', 'USD'],
+  ['ba', ['106.BA'], 5500, 'BA', '波音', 'USD'],
+  ['qqq', ['105.QQQ', '107.QQQ'], 5000, 'QQQ', '纳指100', 'USD'],
+  ['tencent', ['116.00700'], 4200, '0700', '腾讯', 'HKD'],
+  ['moutai', ['1.600519'], 5200, '600519', '贵州茅台', 'CNY'],
+  ['ko', ['106.KO'], 5000, 'KO', '可口可乐', 'USD'],
+  ['dis', ['106.DIS'], 5000, 'DIS', '迪士尼', 'USD'],
+  ['brkb', ['106.BRK_B', '106.BRK_A'], 3000, 'BRK-B', '伯克希尔', 'USD'],
+  ['spx', ['100.SPX'], 5000, 'SPX', '标普500', ''],
+  ['gold', ['107.GLD'], 4000, 'GLD', '黄金', 'USD'],
 ];
 // btc 走 Bitstamp, 单列在此(与 lib/stocks.ts 的 STOCKS 共同维护展示信息)
-const BTC = ['btc', 'BTC', '比特币'];
+const BTC = ['btc', 'BTC', '比特币', 'USD'];
 
 // ticker.json 的条目顺序 = lib/stocks.ts STOCKS 的展示顺序
 const TICKER_ORDER = [
-  ['msft', 'MSFT', '微软'],
-  ['aapl', 'AAPL', '苹果'],
-  ['nvda', 'NVDA', '英伟达'],
-  ['googl', 'GOOGL', '谷歌'],
-  ['amzn', 'AMZN', '亚马逊'],
-  ['tsla', 'TSLA', '特斯拉'],
-  ['meta', 'META', 'Meta'],
-  ['brkb', 'BRK-B', '伯克希尔'],
-  ['ko', 'KO', '可口可乐'],
-  ['dis', 'DIS', '迪士尼'],
-  ['spx', 'SPX', '标普500'],
-  ['gold', 'GLD', '黄金'],
-  ['btc', 'BTC', '比特币'],
+  ['msft', 'MSFT', '微软', 'USD'],
+  ['aapl', 'AAPL', '苹果', 'USD'],
+  ['nvda', 'NVDA', '英伟达', 'USD'],
+  ['googl', 'GOOGL', '谷歌', 'USD'],
+  ['amzn', 'AMZN', '亚马逊', 'USD'],
+  ['tsla', 'TSLA', '特斯拉', 'USD'],
+  ['meta', 'META', 'Meta', 'USD'],
+  ['brkb', 'BRK-B', '伯克希尔', 'USD'],
+  ['ko', 'KO', '可口可乐', 'USD'],
+  ['dis', 'DIS', '迪士尼', 'USD'],
+  ['tsm', 'TSM', '台积电', 'USD'],
+  ['nflx', 'NFLX', '奈飞', 'USD'],
+  ['amd', 'AMD', '超威半导体', 'USD'],
+  ['cost', 'COST', '开市客', 'USD'],
+  ['orcl', 'ORCL', '甲骨文', 'USD'],
+  ['mcd', 'MCD', '麦当劳', 'USD'],
+  ['intc', 'INTC', '英特尔', 'USD'],
+  ['pypl', 'PYPL', 'PayPal', 'USD'],
+  ['ba', 'BA', '波音', 'USD'],
+  ['qqq', 'QQQ', '纳指100', 'USD'],
+  ['tencent', '0700', '腾讯', 'HKD'],
+  ['moutai', '600519', '贵州茅台', 'CNY'],
+  ['spx', 'SPX', '标普500', ''],
+  ['gold', 'GLD', '黄金', 'USD'],
+  ['btc', 'BTC', '比特币', 'USD'],
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -212,7 +236,7 @@ if (wantBtc) {
 
 // ── 生成 ticker.json: 汇总本轮抓取 + 已有数据文件的最新真实价与日涨跌 ──
 const ticker = [];
-for (const [key, sym, zh] of TICKER_ORDER) {
+for (const [key, sym, zh, ccy] of TICKER_ORDER) {
   let j;
   try {
     j = JSON.parse(await readFile(path.join(outDir, `${key}.json`), 'utf8'));
@@ -237,6 +261,7 @@ for (const [key, sym, zh] of TICKER_ORDER) {
     key,
     zh,
     sym,
+    ccy, // '' = 指数(无货币符号)
     price: Math.round(last * 100) / 100,
     chg: Math.round((last / prev - 1) * 10000) / 100,
   });

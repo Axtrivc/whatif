@@ -1,12 +1,15 @@
 /** 标的目录与构建期数据读取 */
 
+export type Ccy = 'USD' | 'HKD' | 'CNY';
+
 export interface StockMeta {
   key: string; // 数据文件名 / URL slug
   symbol: string; // 展示代码
   secid: string; // 东方财富代码
   zh: string; // 中文名
   en: string; // 英文名
-  market: 'nasdaq' | 'nyse' | 'index' | 'gold' | 'crypto';
+  market: 'nasdaq' | 'nyse' | 'index' | 'gold' | 'crypto' | 'hk' | 'ashare';
+  ccy?: Ccy; // 真实价计价货币, 缺省 USD(引擎倍数为比值, 与币种无关)
   hot?: boolean; // 首页精选
   tagline: string; // 一句话
 }
@@ -22,6 +25,18 @@ export const STOCKS: StockMeta[] = [
   { key: 'brkb', symbol: 'BRK-B', secid: '106.BRK_B', zh: '伯克希尔', en: 'Berkshire Hathaway', market: 'nyse', tagline: '巴菲特的复利机器' },
   { key: 'ko', symbol: 'KO', secid: '106.KO', zh: '可口可乐', en: 'Coca-Cola', market: 'nyse', tagline: '巴菲特的最爱' },
   { key: 'dis', symbol: 'DIS', secid: '106.DIS', zh: '迪士尼', en: 'Disney', market: 'nyse', tagline: '米老鼠的百年童话' },
+  { key: 'tsm', symbol: 'TSM', secid: '106.TSM', zh: '台积电', en: 'TSMC', market: 'nyse', hot: true, tagline: '全世界的芯片都绕不开它' },
+  { key: 'nflx', symbol: 'NFLX', secid: '105.NFLX', zh: '奈飞', en: 'Netflix', market: 'nasdaq', hot: true, tagline: '把录像带店干倒闭的公司' },
+  { key: 'amd', symbol: 'AMD', secid: '105.AMD', zh: '超威半导体', en: 'AMD', market: 'nasdaq', hot: true, tagline: '险些破产, 后来的事都知道了' },
+  { key: 'cost', symbol: 'COST', secid: '105.COST', zh: '开市客', en: 'Costco', market: 'nasdaq', tagline: '会员费砌出的护城河' },
+  { key: 'orcl', symbol: 'ORCL', secid: '105.ORCL', zh: '甲骨文', en: 'Oracle', market: 'nasdaq', tagline: '数据库老炮的 AI 第二春' },
+  { key: 'mcd', symbol: 'MCD', secid: '106.MCD', zh: '麦当劳', en: "McDonald's", market: 'nyse', tagline: '汉堡里卖出的复利' },
+  { key: 'intc', symbol: 'INTC', secid: '105.INTC', zh: '英特尔', en: 'Intel', market: 'nasdaq', tagline: '错过时代的巨人(警示案例)' },
+  { key: 'pypl', symbol: 'PYPL', secid: '105.PYPL', zh: 'PayPal', en: 'PayPal', market: 'nasdaq', tagline: '曾经的支付之王(高位警示)' },
+  { key: 'ba', symbol: 'BA', secid: '106.BA', zh: '波音', en: 'Boeing', market: 'nyse', tagline: '天之骄子的至暗十年' },
+  { key: 'qqq', symbol: 'QQQ', secid: '105.QQQ', zh: '纳指100', en: 'Invesco QQQ', market: 'index', tagline: '一篮子科技巨头(ETF)' },
+  { key: 'tencent', symbol: '0700', secid: '116.00700', zh: '腾讯', en: 'Tencent', market: 'hk', ccy: 'HKD', hot: true, tagline: '社交与游戏的印钞机' },
+  { key: 'moutai', symbol: '600519', secid: '1.600519', zh: '贵州茅台', en: 'Kweichow Moutai', market: 'ashare', ccy: 'CNY', hot: true, tagline: 'A 股最硬的白酒' },
   { key: 'spx', symbol: 'SPX', secid: '100.SPX', zh: '标普500', en: 'S&P 500', market: 'index', tagline: '懒人基准：买指数' },
   { key: 'gold', symbol: 'GLD', secid: '107.GLD', zh: '黄金', en: 'Gold (GLD ETF)', market: 'gold', tagline: '穿越周期的硬通货(ETF)' },
   { key: 'btc', symbol: 'BTC', secid: 'bitstamp:btcusd', zh: '比特币', en: 'Bitcoin', market: 'crypto', hot: true, tagline: '2011 年 $10.9，今天呢？' },

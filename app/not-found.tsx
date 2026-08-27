@@ -13,13 +13,13 @@ export default function NotFound() {
       <div className="mt-8 flex gap-3">
         <Link
           href="/"
-          className="rounded-full bg-ink-950 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-ink-900 active:scale-95"
+          className="rounded-md bg-ink-950 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-ink-800 active:scale-95"
         >
           回首页
         </Link>
         <Link
           href="/replay/?s=msft&y=1996&a=100000"
-          className="rounded-full border border-ink-950/15 px-6 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/30 active:scale-95"
+          className="rounded-md border border-ink-950/15 bg-white px-6 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/35 active:scale-95"
         >
           直接看微软 1996
         </Link>

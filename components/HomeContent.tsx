@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import HomePicker from '@/components/HomePicker';
-import LangSwitch from '@/components/LangSwitch';
+import SiteHeader from '@/components/SiteHeader';
 import { computeStats } from '@/lib/engine';
 import { dict, lp, type Locale } from '@/lib/i18n';
 import { moneyEn, moneyZh, multiple } from '@/lib/format';
@@ -15,6 +15,11 @@ const PRESETS: { key: string; year: number; amount: number }[] = [
   { key: 'spx', year: 1990, amount: 100_000 },
   { key: 'gold', year: 2004, amount: 100_000 },
   { key: 'brkb', year: 2011, amount: 100_000 },
+  { key: 'nflx', year: 2007, amount: 100_000 },
+  { key: 'amd', year: 2015, amount: 100_000 },
+  { key: 'tsm', year: 2005, amount: 100_000 },
+  { key: 'tencent', year: 2008, amount: 100_000 },
+  { key: 'moutai', year: 2003, amount: 100_000 },
 ];
 
 /** 定投变体参数: 首笔 = amount/10, 每月追加 = amount/100 (10 万 → 首笔 1 万 + 每月 1000) */
@@ -29,6 +34,7 @@ interface PresetCard {
   amount: number;
   monthly?: number;
   multText: string;
+  up: boolean; // 盈亏语义(倍数≥1), 直接取自引擎而非解析展示文本
   finalEn: string;
   years: number;
 }
@@ -43,6 +49,8 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
 
   // 每个标的可选年份范围
   const ranges: Record<string, { first: number; last: number }> = {};
+  let latestData = ''; // 最新一条行情日期 → 页脚"数据截至"信任信号
+  let earliestData = '99991231'; // 最早一条行情日期 → 英雄区数据条
   for (const s of STOCKS) {
     const series = await loadSeries(s.key);
     if (!series) continue;
@@ -50,7 +58,14 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
       first: Number(series.first.slice(0, 4)),
       last: new Date().getFullYear() - 1,
     };
+    if (series.last > latestData) latestData = series.last;
+    if (series.first < earliestData) earliestData = series.first;
   }
+  // 数据跨度年数(如 COST/MCD 自 1986 → 40 年)
+  const spanYears =
+    earliestData === '99991231'
+      ? 0
+      : Math.max(0, Number(latestData.slice(0, 4)) - Number(earliestData.slice(0, 4)));
 
   // 预设案例真实结果(每个案例生成一次性买入 + 定投两个变体)
   const cards: PresetCard[] = [];
@@ -75,7 +90,8 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
         amount: v.monthly ? p.amount / 10 : p.amount,
         monthly: v.monthly,
         multText: multiple(stats.multiple),
-        finalEn: moneyEn(stats.finalValue),
+        up: stats.multiple >= 1,
+        finalEn: moneyEn(stats.finalValue, meta.ccy),
         years: Math.round(stats.years),
       });
     }
@@ -85,31 +101,14 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-5 pb-16">
-      <header className="flex items-center justify-between py-6">
-        <Link href={lp(locale, '/')} className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink-950 text-lg font-black text-white">
-            ?
-          </span>
-          <div>
-            <div className="text-base font-extrabold leading-tight">{t.siteName}</div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-950/40">
-              {t.brandSub}
-            </div>
-          </div>
-        </Link>
-        <div className="flex items-center gap-2">
-          <LangSwitch locale={locale} />
-          <Link
-            href={lp(locale, '/replay')}
-            className="rounded-full border border-ink-950/10 px-4 py-1.5 text-xs font-semibold text-ink-950/60 transition hover:border-ink-950/25 hover:text-ink-950"
-          >
-            {t.playNow}
-          </Link>
-        </div>
-      </header>
+      <SiteHeader locale={locale} ctaHref={lp(locale, '/replay')} ctaLabel={t.playNow} />
 
       <section className="pt-14 sm:pt-20">
-        <h1 className="max-w-xl text-4xl font-bold leading-[1.15] tracking-tight sm:text-6xl">
+        <div className="wi-eyebrow flex items-center gap-2">
+          <span aria-hidden className="inline-block h-1.5 w-1.5 bg-gain" />
+          WHATIF // REPLAY ENGINE
+        </div>
+        <h1 className="mt-4 max-w-xl text-4xl font-bold leading-[1.15] tracking-tight sm:text-6xl">
           {locale === 'en' ? (
             <>
               What if you had bought{' '}
@@ -126,30 +125,45 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
           <br />
           {t.heroSub2}
         </p>
+
+        {/* 信任数据条: 全部来自构建期真实数据, 零运维成本 */}
+        <dl className="mt-10 flex max-w-md items-end gap-x-10 border-y border-ink-950/10 py-4">
+          {[
+            { v: String(allAssets.length), l: t.trustAssets },
+            { v: earliestData === '99991231' ? '—' : earliestData.slice(0, 4), l: t.trustSince },
+            { v: `${spanYears}+`, l: t.trustSpan },
+          ].map((s) => (
+            <div key={s.l}>
+              <dt className="wi-eyebrow">{s.l}</dt>
+              <dd className="mt-1 font-mono text-xl font-bold tabular-nums leading-none">{s.v}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       <HomePicker stocks={STOCKS} ranges={ranges} locale={locale} />
 
       {/* 预设案例: 数字全部来自真实历史数据 */}
       <section className="mt-20">
-        <h2 className="mb-5 text-[13px] font-medium text-ink-950/35">
-          {t.hotPicks}
-        </h2>
-        <div className="grid grid-cols-2 gap-3">
+        <h2 className="wi-eyebrow mb-5">{t.hotPicks}</h2>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3">
           {cards.map((p) => {
-            const up = statsUp(p.multText);
+            const up = p.up;
             return (
               <Link
                 key={`${p.key}-${p.year}-${p.monthly ?? 'lump'}`}
                 href={`${lp(locale, '/replay')}?s=${p.key}&y=${p.year}&a=${p.amount}${
                   p.monthly ? `&m=dca&monthly=${p.monthly}` : ''
                 }`}
-                className={`group rounded-xl p-4 transition ${
-                  p.monthly
-                    ? 'bg-dca/[0.04] ring-1 ring-inset ring-dca/20 hover:bg-dca/[0.09]'
-                    : 'bg-gain/[0.04] ring-1 ring-inset ring-gain/20 hover:bg-gain/[0.09]'
-                }`}
+                className="group relative overflow-hidden rounded-lg border border-ink-950/10 bg-white p-4 transition duration-200 hover:border-ink-950/35 hover:shadow-[0_10px_28px_-18px_rgba(17,17,20,0.45)]"
               >
+                {/* 左缘模式色条: 暖红=一次性买入, 青绿=定投 */}
+                <span
+                  aria-hidden
+                  className={`absolute inset-y-0 left-0 w-[3px] ${
+                    p.monthly ? 'bg-dca' : 'bg-gain'
+                  } opacity-60 transition group-hover:opacity-100`}
+                />
                 <div className="flex items-center justify-between gap-2">
                   <span className="min-w-0 truncate text-sm font-bold">
                     {p.year} · {p.name}
@@ -159,11 +173,13 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
                       {t.presetDcaTag}
                     </span>
                   ) : (
-                    <span className="shrink-0 font-mono text-[10px] text-ink-950/35">{p.symbol}</span>
+                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-ink-950/35">
+                      {p.symbol}
+                    </span>
                   )}
                 </div>
                 <div
-                  className={`mt-2 font-mono text-xl font-bold tracking-tight ${
+                  className={`mt-2 font-mono text-xl font-bold tracking-tight tabular-nums ${
                     up ? 'text-gain' : 'text-loss'
                   }`}
                 >
@@ -186,9 +202,7 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
 
       {/* 全部标的入口(SEO 内链 + 长尾) */}
       <section className="mt-20">
-        <h2 className="mb-5 text-[13px] font-medium text-ink-950/35">
-          {t.allAssets}
-        </h2>
+        <h2 className="wi-eyebrow mb-5">{t.allAssets}</h2>
         <div className="flex flex-wrap gap-2">
           {allAssets.map((s) => (
             <Link
@@ -205,17 +219,15 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
 
       {/* 怎么算的: 三步说明 */}
       <section className="mt-20">
-        <h2 className="mb-5 text-[13px] font-medium text-ink-950/35">
-          {t.howItWorks}
-        </h2>
+        <h2 className="wi-eyebrow mb-5">{t.howItWorks}</h2>
         <div className="grid gap-x-8 gap-y-6 sm:grid-cols-3">
           {[
             { n: '01', title: t.how1Title, body: t.how1Body },
             { n: '02', title: t.how2Title, body: t.how2Body },
             { n: '03', title: t.how3Title, body: t.how3Body },
           ].map((f) => (
-            <div key={f.n}>
-              <div className="font-mono text-xs text-gain/70">{f.n}</div>
+            <div key={f.n} className="border-t border-ink-950/15 pt-4">
+              <div className="font-mono text-xs tracking-widest text-gain/80">{f.n}</div>
               <div className="mt-2 text-sm font-semibold text-ink-950/90">{f.title}</div>
               <p className="mt-1.5 text-[13px] leading-6 text-ink-950/45">{f.body}</p>
             </div>
@@ -223,16 +235,13 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
         </div>
       </section>
 
-      <footer className="mt-16 border-t border-ink-950/8 pt-6 text-[11px] leading-5 text-ink-950/35">
+      <footer className="mt-16 border-t border-ink-950/8 pt-6 text-[11px] leading-5 text-ink-950/50">
         <p>{t.disclaimer}</p>
-        <p className="mt-2 font-mono">{t.footerNote}</p>
+        <p className="mt-2 font-mono">
+          {t.footerNote}
+          {latestData && <span className="ml-4 opacity-80">· {t.dataAsOf(latestData)}</span>}
+        </p>
       </footer>
     </main>
   );
-}
-
-/** 涨红跌绿判定: 倍数 > 1 即涨(×1.0/×0.x 为绿) */
-function statsUp(multText: string): boolean {
-  const v = parseFloat(multText.slice(1));
-  return Number.isFinite(v) ? v >= 1 : true;
 }

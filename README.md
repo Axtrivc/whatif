@@ -33,8 +33,13 @@
 npm install
 npm run fetch-data   # 抓取/更新股票数据（东财限流, 脚本内置 5s 限速与退避）
 npm run dev
-npm run build        # 静态导出到 out/
+npm run test        # 引擎单元测试（node --test，零依赖）
+npm run lint        # TypeScript 类型检查
+npm run build       # 静态导出到 out/（prebuild 先跑数据完整性校验）
 ```
+
+> OG 分享图：中文版为 tools/og-src.html 模板 → 浏览器以 1200×630 截图存 public/og.png；
+> 英文版由 app/en/opengraph-image.tsx 构建期自动生成。
 
 ## 数据更新
 
