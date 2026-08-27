@@ -5,6 +5,7 @@
   "description": "WhatIf - 假如当时买了 · Investment replay animation. What if you had bought X years ago?",
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/check-data.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",

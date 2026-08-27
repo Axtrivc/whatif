@@ -33,14 +33,20 @@ export interface ReplayStats {
 /** ── DCA 逐日资产序列(与渲染/统计共用) ──
  *  第 i 天的资产值 = Σ_k amount_k * closes[i]/closes[start_k],
  *  其中 amount_k 为第 k 笔投入(start 日投 amount, 此后每月首个交易日投 monthly)。
- *  返回与 dates[start..end] 对齐的 Float64Array。 */
+ *  返回与 dates[start..end] 对齐的 Float64Array。
+ *  按 input 身份 WeakMap 缓存(渲染帧内/HUD 反复调用, 勿修改返回数组)。 */
+const seriesCache = new WeakMap<ReplayInput, Float64Array>();
+
 export function dcaSeries(input: ReplayInput): Float64Array {
+  const hit = seriesCache.get(input);
+  if (hit) return hit;
   const { dates, closes, start, end, amount, monthly } = input;
   const n = end - start;
   const out = new Float64Array(n + 1);
   if (!monthly) {
     const base = closes[start];
     for (let j = 0; j <= n; j++) out[j] = (amount * closes[start + j]) / base;
+    seriesCache.set(input, out);
     return out;
   }
   // 逐月找注入点: 每月首个交易日。份额法: 每笔买入折成份额, 资产 = 份额 × 当日价。
@@ -56,6 +62,37 @@ export function dcaSeries(input: ReplayInput): Float64Array {
     }
     out[j] = shares * closes[i];
   }
+  seriesCache.set(input, out);
+  return out;
+}
+
+/** 截至每日的累计投入(与 dcaSeries 同长对齐): 首笔 amount + 此后每月 monthly。
+ *  一次性买入为常量 amount。同 WeakMap 缓存, 勿修改返回数组。 */
+const investedCache = new WeakMap<ReplayInput, Float64Array>();
+
+export function investedSeries(input: ReplayInput): Float64Array {
+  const hit = investedCache.get(input);
+  if (hit) return hit;
+  const { dates, start, end, amount, monthly } = input;
+  const n = end - start;
+  const out = new Float64Array(n + 1);
+  if (!monthly) {
+    out.fill(amount);
+    investedCache.set(input, out);
+    return out;
+  }
+  let months = 0;
+  let lastM = -1;
+  for (let j = 0; j <= n; j++) {
+    const d = dates[start + j];
+    const m = +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
+    if (lastM < m) {
+      lastM = m;
+      months++;
+    }
+    out[j] = amount + monthly * (months - 1);
+  }
+  investedCache.set(input, out);
   return out;
 }
 
@@ -74,15 +111,6 @@ export function dcaInvested(input: ReplayInput): number {
     }
   }
   return input.amount + input.monthly * (months - 1);
-}
-
-export function valueAt(input: ReplayInput, i: number): number {
-  if (input.monthly) {
-    const s = dcaSeries(input);
-    return s[i - input.start];
-  }
-  const base = input.closes[input.start];
-  return (input.amount * input.closes[i]) / base;
 }
 
 /** 全程统计(回放结束时展示) */
@@ -134,19 +162,4 @@ export function durationFor(points: number): number {
 export function indexAtT(input: ReplayInput, t: number): number {
   const n = input.end - input.start;
   return Math.min(input.end, input.start + Math.floor(t * (n + 1)));
-}
-
-/** 截至 i 的运行最大值索引(画峰值标记用), 供渲染帧内增量维护的初始值 */
-export function runningMaxInit(input: ReplayInput): { idx: number; val: number } {
-  return { idx: input.start, val: input.closes[input.start] };
-}
-
-/** 步进式更新运行最大 */
-export function runningMaxStep(
-  closes: number[],
-  state: { idx: number; val: number },
-  i: number
-): { idx: number; val: number } {
-  if (closes[i] > state.val) return { idx: i, val: closes[i] };
-  return state;
 }

@@ -87,12 +87,12 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
     <main className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-5 pb-16">
       <header className="flex items-center justify-between py-6">
         <Link href={lp(locale, '/')} className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-lg font-black text-ink-950">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink-950 text-lg font-black text-white">
             ?
           </span>
           <div>
             <div className="text-base font-extrabold leading-tight">{t.siteName}</div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-950/40">
               {t.brandSub}
             </div>
           </div>
@@ -101,7 +101,7 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
           <LangSwitch locale={locale} />
           <Link
             href={lp(locale, '/replay')}
-            className="rounded-full border border-white/10 px-4 py-1.5 text-xs font-semibold text-white/60 transition hover:border-white/25 hover:text-white"
+            className="rounded-full border border-ink-950/10 px-4 py-1.5 text-xs font-semibold text-ink-950/60 transition hover:border-ink-950/25 hover:text-ink-950"
           >
             {t.playNow}
           </Link>
@@ -113,22 +113,15 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
           {locale === 'en' ? (
             <>
               What if you had bought{' '}
-              <span className="text-white/40">
-                back then
-              </span>
-              ?
+              <span className="text-gain">back then</span>?
             </>
           ) : (
             <>
-              假如
-              <span className="text-white/40">
-                当时
-              </span>
-              买了…
+              假如<span className="text-gain">当时</span>买了…
             </>
           )}
         </h1>
-        <p className="mt-5 max-w-md text-[15px] leading-7 text-white/50">
+        <p className="mt-5 max-w-md text-[15px] leading-7 text-ink-950/55">
           {t.heroSub}
           <br />
           {t.heroSub2}
@@ -139,54 +132,61 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
 
       {/* 预设案例: 数字全部来自真实历史数据 */}
       <section className="mt-20">
-        <h2 className="mb-5 text-[13px] font-medium text-white/35">
+        <h2 className="mb-5 text-[13px] font-medium text-ink-950/35">
           {t.hotPicks}
         </h2>
         <div className="grid grid-cols-2 gap-3">
-          {cards.map((p) => (
-            <Link
-              key={`${p.key}-${p.year}-${p.monthly ?? 'lump'}`}
-              href={`${lp(locale, '/replay')}?s=${p.key}&y=${p.year}&a=${p.amount}${
-                p.monthly ? `&m=dca&monthly=${p.monthly}` : ''
-              }`}
-              className="group rounded-xl bg-white/[0.03] p-4 transition hover:bg-white/[0.06]"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate text-sm font-bold">
-                  {p.year} · {p.name}
-                </span>
-                {p.monthly ? (
-                  <span className="shrink-0 rounded border border-white/20 px-1.5 py-0.5 text-[10px] font-medium text-white/60">
-                    {t.presetDcaTag}
-                  </span>
-                ) : (
-                  <span className="shrink-0 font-mono text-[10px] text-white/35">{p.symbol}</span>
-                )}
-              </div>
-              <div
-                className={`mt-2 font-mono text-xl font-bold tracking-tight ${
-                  statsUp(p.multText) ? 'text-white' : 'text-loss'
+          {cards.map((p) => {
+            const up = statsUp(p.multText);
+            return (
+              <Link
+                key={`${p.key}-${p.year}-${p.monthly ?? 'lump'}`}
+                href={`${lp(locale, '/replay')}?s=${p.key}&y=${p.year}&a=${p.amount}${
+                  p.monthly ? `&m=dca&monthly=${p.monthly}` : ''
+                }`}
+                className={`group rounded-xl p-4 transition ${
+                  p.monthly
+                    ? 'bg-dca/[0.04] ring-1 ring-inset ring-dca/20 hover:bg-dca/[0.09]'
+                    : 'bg-gain/[0.04] ring-1 ring-inset ring-gain/20 hover:bg-gain/[0.09]'
                 }`}
               >
-                {p.multText}
-              </div>
-              <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-white/45">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-bold">
+                    {p.year} · {p.name}
+                  </span>
+                  {p.monthly ? (
+                    <span className="shrink-0 rounded border border-dca/40 px-1.5 py-0.5 text-[10px] font-medium text-dca">
+                      {t.presetDcaTag}
+                    </span>
+                  ) : (
+                    <span className="shrink-0 font-mono text-[10px] text-ink-950/35">{p.symbol}</span>
+                  )}
+                </div>
+                <div
+                  className={`mt-2 font-mono text-xl font-bold tracking-tight ${
+                    up ? 'text-gain' : 'text-loss'
+                  }`}
+                >
+                  {p.multText}
+                </div>
+              <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-ink-950/45">
                 {locale === 'zh'
                   ? p.monthly
                     ? `首笔 ${moneyZh(p.amount)} + 每月 ${moneyZh(p.monthly)} → ${p.years} 年 · ${p.finalEn}`
                     : `本金 ${moneyZh(p.amount)} → ${p.years} 年后`
                   : p.monthly
-                    ? `${t.presetPrincipal} $${p.amount / 1000}K + $${p.monthly / 1000}K/mo → ${p.years} ${t.yearsLater(0)} · ${p.finalEn}`
-                    : `${t.presetPrincipal} $${p.amount / 1000}K → ${p.years} ${t.yearsLater(0)} · ${p.finalEn}`}
+                    ? `${t.presetPrincipal} ${moneyEn(p.amount)} + ${moneyEn(p.monthly!)}/mo → ${p.years} ${t.yearsLater(0)} · ${p.finalEn}`
+                    : `${t.presetPrincipal} ${moneyEn(p.amount)} → ${p.years} ${t.yearsLater(0)} · ${p.finalEn}`}
               </div>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
       </section>
 
       {/* 全部标的入口(SEO 内链 + 长尾) */}
       <section className="mt-20">
-        <h2 className="mb-5 text-[13px] font-medium text-white/35">
+        <h2 className="mb-5 text-[13px] font-medium text-ink-950/35">
           {t.allAssets}
         </h2>
         <div className="flex flex-wrap gap-2">
@@ -194,10 +194,10 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
             <Link
               key={s.key}
               href={lp(locale, `/p/${s.key}`)}
-              className="text-sm text-white/60 underline decoration-white/15 underline-offset-4 transition hover:text-white hover:decoration-white/40"
+              className="text-sm text-ink-950/60 underline decoration-ink-950/15 underline-offset-4 transition hover:text-ink-950 hover:decoration-ink-950/40"
             >
               {locale === 'zh' ? s.zh : s.en}{' '}
-              <span className="font-mono text-xs text-white/40">{s.symbol}</span>
+              <span className="font-mono text-xs text-ink-950/40">{s.symbol}</span>
             </Link>
           ))}
         </div>
@@ -205,7 +205,7 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
 
       {/* 怎么算的: 三步说明 */}
       <section className="mt-20">
-        <h2 className="mb-5 text-[13px] font-medium text-white/35">
+        <h2 className="mb-5 text-[13px] font-medium text-ink-950/35">
           {t.howItWorks}
         </h2>
         <div className="grid gap-x-8 gap-y-6 sm:grid-cols-3">
@@ -215,15 +215,15 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
             { n: '03', title: t.how3Title, body: t.how3Body },
           ].map((f) => (
             <div key={f.n}>
-              <div className="font-mono text-xs text-white/30">{f.n}</div>
-              <div className="mt-2 text-sm font-semibold text-white/90">{f.title}</div>
-              <p className="mt-1.5 text-[13px] leading-6 text-white/45">{f.body}</p>
+              <div className="font-mono text-xs text-gain/70">{f.n}</div>
+              <div className="mt-2 text-sm font-semibold text-ink-950/90">{f.title}</div>
+              <p className="mt-1.5 text-[13px] leading-6 text-ink-950/45">{f.body}</p>
             </div>
           ))}
         </div>
       </section>
 
-      <footer className="mt-16 border-t border-white/8 pt-6 text-[11px] leading-5 text-white/35">
+      <footer className="mt-16 border-t border-ink-950/8 pt-6 text-[11px] leading-5 text-ink-950/35">
         <p>{t.disclaimer}</p>
         <p className="mt-2 font-mono">{t.footerNote}</p>
       </footer>

@@ -57,12 +57,12 @@ export default function TickerTape() {
         const up = it.chg >= 0;
         return (
           <span key={`${dup}-${it.key}`} className="mx-5 inline-flex items-baseline gap-1.5 font-mono text-xs">
-            <span className="text-white/60">
+            <span className="text-ink-950/60">
               {enNames ? STOCK_MAP[it.key]?.en ?? it.zh : it.zh}
             </span>
-            <span className="text-white/40">{it.sym}</span>
-            <span className="tabular-nums text-white/80">
-              {it.sym === 'SPX' || it.sym === 'GLD' ? it.price.toFixed(2) : `$${it.price.toFixed(2)}`}
+            <span className="text-ink-950/40">{it.sym}</span>
+            <span className="tabular-nums text-ink-950/80 transition-colors group-hover:text-gain">
+              {it.sym === 'SPX' ? it.price.toFixed(2) : `$${it.price.toFixed(2)}`}
             </span>
             <span className={`tabular-nums ${up ? 'text-profit' : 'text-loss'}`}>
               {up ? '▲' : '▼'} {Math.abs(it.chg).toFixed(2)}%
@@ -74,10 +74,10 @@ export default function TickerTape() {
   );
 
   return (
-    <div className="relative mt-3 overflow-hidden rounded-xl border border-white/8 bg-ink-900/60 py-2">
+    <div className="relative mt-3 overflow-hidden rounded-xl border border-ink-950/8 bg-black/[0.03] py-2">
       {/* 左右渐隐遮罩 */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-ink-950 to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-ink-950 to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-[#fafafa] to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-[#fafafa] to-transparent" />
       <div className="wi-marquee flex w-max">
         {row(0)}
         {row(1)}

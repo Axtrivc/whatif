@@ -3,20 +3,20 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
-/* 键盘可达性: 统一 focus 可见样式(白, 极简) */
+/* 键盘可达性: 统一 focus 可见样式(墨色, 极简) */
 :focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline: 2px solid rgba(17, 17, 20, 0.5);
   outline-offset: 2px;
 }
 
 ::selection {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(212, 43, 58, 0.15);
 }
 
-/* 进度条(range): 细轨 + 白色圆点 thumb */
+/* 进度条(range): 细轨 + 墨色圆点 thumb */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
@@ -28,7 +28,7 @@ input[type='range']::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
   border-radius: 9999px;
-  background: #ffffff;
+  background: #111114;
   cursor: pointer;
 }
 input[type='range']::-moz-range-thumb {
@@ -36,7 +36,7 @@ input[type='range']::-moz-range-thumb {
   height: 14px;
   border: none;
   border-radius: 9999px;
-  background: #ffffff;
+  background: #111114;
   cursor: pointer;
 }
 

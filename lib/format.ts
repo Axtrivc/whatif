@@ -6,34 +6,35 @@ const trim = (x: number, d: number): string => {
   return s;
 };
 
-/** 金额(纯中文万/亿, 无货币符号): 209万 / 8.2万 / 949.4万 / 1.23亿 */
+/** 金额(纯中文万/亿, 无货币符号): 209万 / 8.2万 / 949.4万 / 1.23亿
+ *  进位边界取 "会四舍五入成 10000 低一级单位" 的阈值(9999.5万→1亿), 避免出现 10000万 */
 export function moneyZh(v: number): string {
   if (!Number.isFinite(v)) return '-';
   const abs = Math.abs(v);
-  if (abs >= 1e12) return `${trim(v / 1e12, 2)}万亿`;
-  if (abs >= 1e8) return `${trim(v / 1e8, 2)}亿`;
+  if (abs >= 999_950_000_000) return `${trim(v / 1e12, 2)}万亿`;
+  if (abs >= 99_995_000) return `${trim(v / 1e8, 2)}亿`;
   if (abs >= 1e4) return `${trim(v / 1e4, abs >= 1e6 ? 0 : 1)}万`;
   return trim(v, 0);
 }
 
-/** 带符号盈亏: +939万 / -91.83万 / +1.23亿 */
+/** 带符号盈亏: +939万 / -91.83万 / +1.23亿 (进位阈值同 moneyZh) */
 export function profitZh(v: number): string {
   const sign = v >= 0 ? '+' : '-';
   const abs = Math.abs(v);
-  if (abs >= 1e8) return `${sign}${trim(abs / 1e8, 2)}亿`;
+  if (abs >= 99_995_000) return `${sign}${trim(abs / 1e8, 2)}亿`;
   if (abs >= 1e6) return `${sign}${trim(abs / 1e4, 0)}万`;
   if (abs >= 1e4) return `${sign}${trim(abs / 1e4, 2)}万`;
   return `${sign}${trim(abs, 0)}`;
 }
 
-/** 金额(英文缩写): $1.23M / $4.87B */
+/** 金额(英文缩写): $1.23M / $4.87B (999,500 → $1.00M, 不出现 $1000K; 整数美元不带小数) */
 export function moneyEn(v: number): string {
   const abs = Math.abs(v);
-  if (abs >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
-  if (abs >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
+  if (abs >= 999_995_000_000) return `$${(v / 1e12).toFixed(2)}T`;
+  if (abs >= 999_995_000) return `$${(v / 1e9).toFixed(2)}B`;
+  if (abs >= 999_500) return `$${(v / 1e6).toFixed(2)}M`;
   if (abs >= 1e3) return `$${(v / 1e3).toFixed(abs >= 1e5 ? 0 : 1)}K`;
-  return `$${v.toFixed(2)}`;
+  return Number.isInteger(v) ? `$${v}` : `$${v.toFixed(2)}`;
 }
 
 /** 涨幅: +244.02% / -91.83% */

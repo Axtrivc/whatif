@@ -1,5 +1,4 @@
 import { ImageResponse } from 'next/og';
-import type { Metadata } from 'next';
 
 export const dynamic = 'force-static';
 export const size = { width: 1200, height: 630 };
@@ -18,8 +17,8 @@ export default function OgImage() {
           flexDirection: 'column',
           justifyContent: 'center',
           padding: '80px',
-          background: 'linear-gradient(135deg, #101018 0%, #07070b 100%)',
-          color: '#f5f5f7',
+          background: 'linear-gradient(135deg, #ffffff 0%, #f4f4f6 100%)',
+          color: '#111114',
           fontFamily: 'sans-serif',
         }}
       >
@@ -29,7 +28,7 @@ export default function OgImage() {
         <div style={{ display: 'flex', fontSize: 72, fontWeight: 900, lineHeight: 1.2 }}>
           What if you had bought
         </div>
-        <div style={{ display: 'flex', fontSize: 72, fontWeight: 900, lineHeight: 1.2, color: '#e8c96a' }}>
+        <div style={{ display: 'flex', fontSize: 72, fontWeight: 900, lineHeight: 1.2, color: '#d42b3a' }}>
           back then?
         </div>
         <div style={{ display: 'flex', fontSize: 40, opacity: 0.6, marginTop: 36 }}>
@@ -40,8 +39,3 @@ export default function OgImage() {
     size
   );
 }
-
-/** 覆盖根布局的 twitter card 图, openGraph.images 在 page metadata 里指向本文件产物 */
-export const metadata: Metadata = {
-  twitter: { card: 'summary_large_image', images: ['/en/opengraph-image'] },
-};

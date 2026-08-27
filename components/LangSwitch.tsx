@@ -18,7 +18,7 @@ export default function LangSwitch({ locale }: { locale: Locale }) {
       href={href}
       lang={target === 'en' ? 'en' : 'zh-CN'}
       aria-label={target === 'en' ? 'Switch to English' : '切换到中文'}
-      className="rounded-full border border-white/10 px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-wider text-white/60 transition hover:border-white/25 hover:text-white"
+      className="rounded-full border border-ink-950/10 px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-wider text-ink-950/60 transition hover:border-ink-950/25 hover:text-ink-950"
     >
       {target === 'en' ? 'EN' : '中'}
     </Link>

@@ -57,10 +57,12 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
     fastStart: 'in-memory',
   });
 
+  // 编码器错误在回调里抛出不会传给 await 链, 先捕获再在循环/收尾处检查
+  let encError: Error | null = null;
   const enc = new (window as any).VideoEncoder({
     output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
     error: (e: Error) => {
-      throw e;
+      encError = e;
     },
   });
   enc.configure({
@@ -76,6 +78,10 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
     if (signal?.aborted) {
       enc.close();
       throw new DOMException('aborted', 'AbortError');
+    }
+    if (encError) {
+      enc.close();
+      throw encError;
     }
     const t = Math.min(1, (f * speed) / (animSec * FPS));
     renderFrame(ctx, {
@@ -98,12 +104,21 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
     frame.close();
     if (f % 6 === 0) {
       onProgress?.(f / totalFrames);
+      // 编码队列背压: 渲染快于编码时让出主线程等队列排空, 防内存堆积
+      while (enc.encodeQueueSize > 12 && !encError) {
+        await new Promise((r) => setTimeout(r, 1));
+      }
       await new Promise((r) => setTimeout(r, 0)); // 让出主线程, 保 UI 可响应
     }
+  }
+  if (encError) {
+    enc.close();
+    throw encError;
   }
   onProgress?.(1);
   await enc.flush();
   enc.close();
+  if (encError) throw encError;
   muxer.finalize();
   const { buffer } = muxer.target as ArrayBufferTarget;
   return new Blob([buffer], { type: 'video/mp4' });

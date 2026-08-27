@@ -70,15 +70,15 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
 
   if (!stock) {
     return (
-      <div className="mt-10 rounded-2xl border border-white/10 bg-ink-800 p-6 text-center text-sm text-white/50">
-        {t.dataMissing} <code className="font-mono text-white/80">npm run fetch-data</code>
+      <div className="mt-10 rounded-2xl border border-ink-950/10 bg-black/[0.05] p-6 text-center text-sm text-ink-950/50">
+        {t.dataMissing} <code className="font-mono text-ink-950/80">npm run fetch-data</code>
       </div>
     );
   }
 
   return (
-    <section className="mt-12 border-y border-white/8 py-8">
-      <div className="text-[13px] font-medium text-white/35">{t.pickStock}</div>
+    <section className="mt-12 border-y border-ink-950/8 py-8">
+      <div className="text-[13px] font-medium text-ink-950/35">{t.pickStock}</div>
       <div className="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-7">
         {available.map((s) => (
           <button
@@ -87,8 +87,8 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
             onClick={() => pick(s.key)}
             className={`rounded-lg border px-2 py-2.5 text-center transition active:scale-95 ${
               s.key === key
-                ? 'border-white bg-white font-semibold text-ink-950'
-                : 'border-white/10 text-white/60 hover:border-white/30 hover:text-white'
+                ? 'border-ink-950 bg-ink-950 font-semibold text-white'
+                : 'border-ink-950/15 text-ink-950/60 hover:border-ink-950/40 hover:text-ink-950'
             }`}
           >
             <div className="truncate text-sm leading-none" title={locale === 'zh' ? s.zh : s.en}>
@@ -98,10 +98,10 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
           </button>
         ))}
       </div>
-      <p className="mt-2 text-[11px] text-white/35">
+      <p className="mt-2 text-[11px] text-gain/70">
         {locale === 'zh' ? stock.tagline : TAGLINE_EN[stock.key] ?? stock.en}
       </p>
-      <div className="mt-8 text-[13px] font-medium text-white/35">{t.pickYear}</div>
+      <div className="mt-8 text-[13px] font-medium text-ink-950/35">{t.pickYear}</div>
       <div className="mt-3 flex items-center gap-3">
         <input
           type="range"
@@ -109,7 +109,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
           max={ranges[key].last}
           value={year}
           onChange={(e) => setYear(Number(e.target.value))}
-          className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/15"
+          className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-ink-950/15"
           aria-label={t.yearAria}
         />
         <span className="w-20 shrink-0 text-center font-mono text-lg font-semibold tabular-nums">
@@ -117,15 +117,15 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
         </span>
       </div>
 
-      <div className="mt-8 text-[13px] font-medium text-white/35">{t.pickAmount}</div>
+      <div className="mt-8 text-[13px] font-medium text-ink-950/35">{t.pickAmount}</div>
       {/* 模式切换: 一次性买入 ↔ 每月定投 */}
-      <div className="mt-3 inline-flex overflow-hidden rounded-full border border-white/15" role="group" aria-label={locale === 'zh' ? '投入方式' : 'Investment mode'}>
+      <div className="mt-3 inline-flex overflow-hidden rounded-full border border-ink-950/15" role="group" aria-label={locale === 'zh' ? '投入方式' : 'Investment mode'}>
         <button
           type="button"
           onClick={() => setDca(false)}
           aria-pressed={!dca}
           className={`px-4 py-1.5 text-xs font-bold transition ${
-            !dca ? 'bg-white/15 text-white' : 'text-white/50 hover:text-white/80'
+            !dca ? 'bg-ink-950 text-white' : 'text-ink-950/50 hover:text-ink-950/80'
           }`}
         >
           {t.pickModeLump}
@@ -134,9 +134,9 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
           type="button"
           onClick={() => setDca(true)}
           aria-pressed={dca}
-          className={`px-4 py-1.5 text-xs font-bold transition ${
-            dca ? 'bg-white/15 text-white' : 'text-white/50 hover:text-white/80'
-          }`}
+            className={`px-4 py-1.5 text-xs font-bold transition ${
+              dca ? 'bg-dca/25 text-dca' : 'text-ink-950/50 hover:text-ink-950/80'
+            }`}
         >
           {t.pickModeDca}
         </button>
@@ -152,8 +152,8 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
             }}
             className={`rounded-full border px-4 py-2 font-mono text-sm transition active:scale-95 ${
               !custom && amount === a
-                ? 'border-white bg-white font-semibold text-ink-950'
-                : 'border-white/10 text-white/60 hover:border-white/30 hover:text-white'
+                ? 'border-ink-950 bg-ink-950 font-semibold text-white'
+                : 'border-ink-950/15 text-ink-950/60 hover:border-ink-950/40 hover:text-ink-950'
             }`}
           >
             {t.amountLabel(a)}
@@ -166,14 +166,14 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
           onKeyDown={(e) => e.key === 'Enter' && play()}
           placeholder={t.customAmount}
           aria-label={t.customAmountAria}
-          className="w-28 rounded-full border border-white/10 bg-transparent py-2 pl-4 pr-3 font-mono text-sm text-white placeholder:text-white/25 focus:border-white/50 focus:outline-none"
+          className="w-28 rounded-full border border-ink-950/10 bg-transparent py-2 pl-4 pr-3 font-mono text-sm text-ink-950 placeholder:text-ink-950/25 focus:border-ink-950/50 focus:outline-none"
         />
       </div>
 
       {/* 定投模式: 每月追加额 */}
       {dca && (
         <div className="mt-4">
-          <div className="text-[11px] font-semibold text-white/45">{t.pickMonthly}</div>
+          <div className="text-[11px] font-semibold text-ink-950/45">{t.pickMonthly}</div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {MONTHLY_PRESETS.map((m) => (
               <button
@@ -185,8 +185,8 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
                 }}
                 className={`rounded-full border px-3.5 py-1.5 font-mono text-xs transition active:scale-95 ${
                   !customMonthly && monthly === m
-                    ? 'border-white bg-white font-semibold text-ink-950'
-                    : 'border-white/10 text-white/60 hover:border-white/30 hover:text-white'
+                    ? 'border-dca bg-dca font-semibold text-ink-950'
+                    : 'border-ink-950/15 text-ink-950/60 hover:border-dca/50 hover:text-dca'
                 }`}
               >
                 {t.amountLabel(m)}
@@ -199,7 +199,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
               onKeyDown={(e) => e.key === 'Enter' && play()}
               placeholder={t.customAmount}
               aria-label={t.pickMonthly}
-              className="w-24 rounded-full border border-white/10 bg-transparent py-1.5 pl-3.5 pr-3 font-mono text-xs text-white placeholder:text-white/25 focus:border-white/50 focus:outline-none"
+              className="w-24 rounded-full border border-ink-950/10 bg-transparent py-1.5 pl-3.5 pr-3 font-mono text-xs text-ink-950 placeholder:text-ink-950/25 focus:border-ink-950/50 focus:outline-none"
             />
           </div>
         </div>
@@ -208,11 +208,11 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
       <button
         type="button"
         onClick={play}
-        className="mt-8 w-full rounded-xl bg-white py-3.5 text-base font-semibold text-ink-950 transition hover:bg-white/90 active:scale-[0.99]"
+        className="mt-8 w-full rounded-xl bg-ink-950 py-3.5 text-base font-semibold text-white transition hover:bg-ink-900 active:scale-[0.99]"
       >
         {t.startReplay}
       </button>
-      <p className="mt-3 text-[12px] text-white/35">
+      <p className="mt-3 text-[12px] text-ink-950/35">
         {t.replaySummary(year, t.amountLabel(effAmount))}
       </p>
     </section>

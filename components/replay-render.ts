@@ -11,7 +11,7 @@
  *
  * 跨帧平滑状态(lo/hi/f)由调用方持有并经 smooth 传入 —— 渲染本身仍无副作用。
  */
-import { dcaSeries, indexAtT, type ReplayInput } from '@/lib/engine';
+import { dcaSeries, indexAtT, investedSeries, type ReplayInput } from '@/lib/engine';
 import { dateYM, moneyEn, moneyZh } from '@/lib/format';
 
 export interface SmoothState {
@@ -39,8 +39,8 @@ export interface ChartOpts {
 
 const MONO = 'ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace';
 const SANS = '"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
-const RED: [number, number, number] = [255, 76, 108]; // #FF4C6C 盈(热粉)
-const CYAN: [number, number, number] = [0, 245, 212]; // #00F5D4 亏
+const RED: [number, number, number] = [210, 43, 58]; // #D42B3A 盈(白底可读暖红)
+const CYAN: [number, number, number] = [14, 159, 118]; // #0E9F76 亏(白底可读青绿)
 
 /**
  * ── 帧内热路径预计算(按 input 身份缓存一次) ──
@@ -52,6 +52,7 @@ const CYAN: [number, number, number] = [0, 245, 212]; // #00F5D4 亏
 interface Prepared {
   ts: Float64Array; // [0..n] 各交易日 0:00 UTC 时间戳
   val: Float64Array; // [0..n] 各日资产值
+  inv: Float64Array; // [0..n] 截至当日累计投入(盈亏色基准; 一次性买入为常量本金)
   min: Float64Array; // [0..k] 前缀最小资产值
   max: Float64Array; // [0..k] 前缀最大资产值
   cmpMin?: Float64Array; // 对比曲线前缀最小(定投对比模式)
@@ -86,8 +87,9 @@ function prepare(input: ReplayInput): Prepared {
   if (cached) return cached;
   const n = input.end - input.start;
   const ts = new Float64Array(n + 1);
-  // 资产序列: DCA(份额法)或一次性买入(比值法)统一由引擎给出
+  // 资产序列: DCA(份额法)或一次性买入(比值法)统一由引擎给出(引擎内已缓存)
   const val = dcaSeries(input);
+  const inv = investedSeries(input);
   const min = new Float64Array(n + 1);
   const max = new Float64Array(n + 1);
   let mn = Infinity;
@@ -100,7 +102,7 @@ function prepare(input: ReplayInput): Prepared {
     min[j] = mn;
     max[j] = mx;
   }
-  const p: Prepared = { ts, val, min, max };
+  const p: Prepared = { ts, val, inv, min, max };
   prepCache.set(input, p);
   return p;
 }
@@ -122,7 +124,6 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
 
   const p = prepare(input);
   const idx = indexAtT(input, t);
-  const amount = input.amount;
   const n = input.end - input.start;
   const k = idx - input.start; // 前缀数组下标
 
@@ -185,22 +186,8 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const lo = smooth.lo;
   const hi = Math.max(smooth.hi, smooth.lo + 1e-9);
 
-  // ── 盈亏状态色: 红↔青绿 无缝过渡(相对截至当日的累计投入) ──
-  const putIn = (() => {
-    if (!input.monthly) return amount;
-    // 截至前沿所在日的注入笔数
-    let months = 0;
-    let lastM = -1;
-    for (let j = 0; j <= k; j++) {
-      const d = input.dates[input.start + j];
-      const m = +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
-      if (lastM < m) {
-        lastM = m;
-        months++;
-      }
-    }
-    return amount + input.monthly * (months - 1);
-  })();
+  // ── 盈亏状态色: 红↔青绿 无缝过渡(相对截至当日的累计投入, 预计算前缀 O(1)) ──
+  const putIn = p.inv[k];
   const targetF = value >= putIn ? 1 : 0;
   smooth.f = smooth.f == null ? targetF : smooth.f + (targetF - smooth.f) * damp(0.07);
   const f = smooth.f;
@@ -229,16 +216,16 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   for (let g = 0; g <= 5; g++) {
     const gv = lo + ((hi - lo) * g) / 5;
     const gy = yOf(gv);
-    ctx.strokeStyle = 'rgba(245,245,247,0.05)';
+    ctx.strokeStyle = 'rgba(17,17,20,0.06)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(plotL, gy);
     ctx.lineTo(plotR, gy);
     ctx.stroke();
-    ctx.fillStyle = 'rgba(245,245,247,0.35)';
+    ctx.fillStyle = 'rgba(17,17,20,0.42)';
     ctx.fillText(money(gv), 8, gy);
   }
-  ctx.strokeStyle = 'rgba(245,245,247,0.1)';
+  ctx.strokeStyle = 'rgba(17,17,20,0.14)';
   ctx.beginPath();
   ctx.moveTo(plotL + 0.5, plotT);
   ctx.lineTo(plotL + 0.5, plotB);
@@ -257,18 +244,18 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.moveTo(lx - 96, plotT + 12);
     ctx.lineTo(lx - 58, plotT + 12);
     ctx.stroke();
-    ctx.fillStyle = 'rgba(245,245,247,0.55)';
+    ctx.fillStyle = 'rgba(17,17,20,0.6)';
     ctx.fillText(locale === 'en' ? 'DCA' : '定投', lx, plotT + 12);
     // 对比线样式
     ctx.setLineDash([5, 4]);
-    ctx.strokeStyle = 'rgba(245,245,247,0.4)';
+    ctx.strokeStyle = 'rgba(17,17,20,0.38)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(lx - 96, plotT + 30);
     ctx.lineTo(lx - 58, plotT + 30);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(245,245,247,0.4)';
+    ctx.fillStyle = 'rgba(17,17,20,0.45)';
     ctx.fillText(locale === 'en' ? 'Lump sum' : '一次性', lx, plotT + 30);
   }
 
@@ -296,7 +283,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     if (x < plotL + 20 || x > plotR - 20) continue;
     if (placedXs.length && x - placedXs[placedXs.length - 1] < 50) continue;
     const label = `${y}-${String(m).padStart(2, '0')}`;
-    ctx.fillStyle = 'rgba(245,245,247,0.3)';
+    ctx.fillStyle = 'rgba(17,17,20,0.36)';
     ctx.fillText(label, x, h - 10);
     placedXs.push(x);
   }
@@ -321,7 +308,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     for (let j = 1; j <= k; j++) ctx.lineTo(xOf(j), yOf(cmp[j]));
     if (cmpVal != null) ctx.lineTo(headX, yOf(cmpVal));
     ctx.setLineDash([6, 5]);
-    ctx.strokeStyle = 'rgba(245,245,247,0.4)';
+    ctx.strokeStyle = 'rgba(17,17,20,0.38)';
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
     ctx.stroke();
@@ -329,7 +316,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   }
   const area = ctx.createLinearGradient(0, plotT, 0, plotB);
   area.addColorStop(0, mixColor(f, 0.3));
-  area.addColorStop(1, 'rgba(0,0,0,0)');
+  area.addColorStop(1, 'rgba(255,255,255,0)');
   drawPath();
   ctx.lineTo(headX, plotB);
   ctx.lineTo(plotL, plotB);
@@ -343,12 +330,12 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.strokeStyle = mixColor(f, 0.32);
   ctx.lineWidth = 7;
   ctx.shadowColor = glowColor;
-  ctx.shadowBlur = 22;
+  ctx.shadowBlur = 10;
   ctx.stroke();
   drawPath();
   ctx.strokeStyle = lineColor;
   ctx.lineWidth = 3;
-  ctx.shadowBlur = 14;
+  ctx.shadowBlur = 6;
   ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.restore();
@@ -401,10 +388,10 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.arc(cx, cy, 5, 0, Math.PI * 2);
   ctx.fillStyle = lineColor;
   ctx.shadowColor = glowColor;
-  ctx.shadowBlur = 14;
+  ctx.shadowBlur = 6;
   ctx.fill();
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
@@ -414,7 +401,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   ctx.font = `800 ${fs}px ${SANS}`;
   ctx.textBaseline = 'middle';
   ctx.shadowColor = glowColor;
-  ctx.shadowBlur = 18;
+  ctx.shadowBlur = 8;
   ctx.fillStyle = lineColor;
   const tw = ctx.measureText(label).width;
   if (cx - 18 - tw > plotL + 4) {
@@ -445,7 +432,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   };
   ctx.beginPath();
   rr(ccx - cw / 2, ccy - chh / 2, cw, chh, 6);
-  ctx.fillStyle = 'rgba(10,13,24,0.85)';
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.fill();
   ctx.strokeStyle = mixColor(f, 0.75);
   ctx.lineWidth = 1;
@@ -460,7 +447,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'alphabetic';
     ctx.font = `600 11px ${MONO}`;
-    ctx.fillStyle = 'rgba(245,245,247,0.25)';
+    ctx.fillStyle = 'rgba(17,17,20,0.22)';
     ctx.fillText(o.watermark, w - 12, h - 46);
   }
 

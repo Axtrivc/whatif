@@ -54,10 +54,10 @@ export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
   if (!stock || error) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4">
-        <p className="text-white/60">{error === 'load' ? t.loadFailed : t.unknownStock}</p>
+        <p className="text-ink-950/60">{error === 'load' ? t.loadFailed : t.unknownStock}</p>
         <Link
           href={homeHref}
-          className="rounded-full border border-white/15 px-5 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
+          className="rounded-full border border-ink-950/15 px-5 py-2 text-sm text-ink-950/70 transition hover:border-ink-950/40 hover:text-ink-950"
         >
           {t.backHome}
         </Link>
@@ -68,7 +68,7 @@ export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
   if (!series) {
     return (
       <div className="flex min-h-dvh items-center justify-center">
-        <div className="animate-pulse font-mono text-sm text-white/40">{t.loadingData}</div>
+        <div className="animate-pulse font-mono text-sm text-ink-950/40">{t.loadingData}</div>
       </div>
     );
   }

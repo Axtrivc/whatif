@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { computeStats, dcaInvested, dcaSeries, durationFor, type ReplayInput } from '@/lib/engine';
+import { computeStats, dcaInvested, dcaSeries, durationFor, investedSeries, type ReplayInput } from '@/lib/engine';
 import { dateYM, money, pct, profit, usdPrice } from '@/lib/format';
-import { dict, TAGLINE_EN, type Locale } from '@/lib/i18n';
+import { dict, type Locale } from '@/lib/i18n';
 import { startIndexForYear, type Series, type StockMeta } from '@/lib/stocks';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
 import { buildShareImage } from '@/components/ShareCard';
@@ -87,6 +87,7 @@ export default function ReplayExperience({
   const [copied, setCopied] = useState(false);
   const [videoPct, setVideoPct] = useState<number | null>(null); // null=空闲, 0-100=导出中
   const videoSupported = useMemo(() => videoExportSupported(), []);
+  const videoAbortRef = useRef<AbortController | null>(null); // 卸载时中止编码
 
   const input = useMemo<ReplayInput>(() => {
     const start = startIndexForYear(series, year);
@@ -161,24 +162,13 @@ export default function ReplayExperience({
       // 右上角战报 + 底部价格直写
       const i0 = input.start;
       const i = Math.min(input.end, i0 + Math.floor(tt * (input.end - i0 + 1)));
-      // DCA 模式: 资产与累计投入都从份额法序列取; lump-sum 用比值法
+      // DCA 模式: 资产与累计投入都查引擎缓存序列; lump-sum 用比值法
       let value: number;
       let putIn: number;
       if (input.monthly) {
-        const s = dcaSeries(input);
-        value = s[Math.min(i, input.end) - i0];
-        // 截至第 i 天的注入笔数(首笔 + 月度)
-        let months = 0;
-        let lastM = -1;
-        for (let j = i0; j <= i; j++) {
-          const d = series.dates[j];
-          const m = +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
-          if (lastM < m) {
-            lastM = m;
-            months++;
-          }
-        }
-        putIn = amount + (input.monthly ?? 0) * (months - 1);
+        const j = i - i0;
+        value = dcaSeries(input)[j];
+        putIn = investedSeries(input)[j];
       } else {
         value = (amount * input.closes[i]) / input.closes[i0];
         putIn = amount;
@@ -234,23 +224,23 @@ export default function ReplayExperience({
       accRef.current = Math.min(duration, accRef.current + dt);
       const nt = accRef.current / duration;
       tRef.current = nt;
+      // 离屏帧丢弃: 后台标签 rAF 降频时, 只推进内容时间, 跳过重绘与 DOM 直写;
+      // 里程碑检测同步跳过(无渲染则闪光无意义), 回到前台后由下一帧恢复
+      if (document.hidden) {
+        if (nt >= 1) {
+          setPlaying(false);
+          finaleTimerRef.current = window.setTimeout(() => setDone(true), 0);
+          return;
+        }
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
       // 里程碑检测(回本 / 首破整数倍) → 渲染层闪光; DCA 相对累计投入
       const i = Math.min(input.end, input.start + Math.floor(nt * (input.end - input.start + 1)));
       let m: number;
       if (input.monthly) {
-        const s = dcaSeries(input);
-        let months = 0;
-        let lastM = -1;
-        for (let j = input.start; j <= i; j++) {
-          const d = series.dates[j];
-          const mm = +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
-          if (lastM < mm) {
-            lastM = mm;
-            months++;
-          }
-        }
-        const put = amount + (input.monthly ?? 0) * (months - 1);
-        m = s[i - input.start] / put;
+        const j = i - input.start;
+        m = dcaSeries(input)[j] / investedSeries(input)[j];
       } else {
         m = input.closes[i] / input.closes[input.start];
       }
@@ -280,8 +270,14 @@ export default function ReplayExperience({
     };
   }, [playing, speed, duration, draw, input]);
 
-  // 卸载时清理终点计时器
-  useEffect(() => () => window.clearTimeout(finaleTimerRef.current), []);
+  // 卸载时清理终点计时器 + 中止进行中的视频导出
+  useEffect(
+    () => () => {
+      window.clearTimeout(finaleTimerRef.current);
+      videoAbortRef.current?.abort();
+    },
+    []
+  );
 
   const restart = useCallback(() => {
     window.clearTimeout(finaleTimerRef.current);
@@ -386,13 +382,17 @@ export default function ReplayExperience({
   const exportVideo = async () => {
     if (!stats || videoPct != null) return;
     setVideoPct(0);
+    const ctl = new AbortController();
+    videoAbortRef.current = ctl;
     try {
       const blob = await exportReplayVideo({
         input,
         locale,
         compareSeries,
         onProgress: (p) => setVideoPct(Math.round(p * 100)),
+        signal: ctl.signal,
       });
+      if (ctl.signal.aborted) return;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -400,8 +400,9 @@ export default function ReplayExperience({
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
     } catch {
-      /* 编码失败静默恢复按钮 */
+      /* 编码失败/中止静默恢复按钮 */
     } finally {
+      videoAbortRef.current = null;
       setVideoPct(null);
     }
   };
@@ -413,14 +414,14 @@ export default function ReplayExperience({
         <div className="flex flex-col gap-1.5 pt-1">
           <Link
             href={homeHref}
-            className="inline-flex items-center gap-1 text-xs text-white/50 transition hover:text-white"
+            className="inline-flex items-center gap-1 text-xs text-ink-950/50 transition hover:text-ink-950"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M10 3 5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             {t.back}
           </Link>
-          <span className="font-mono text-xs font-semibold text-white/55">
+          <span className="font-mono text-xs font-semibold text-ink-950/55">
             {monthly
               ? locale === 'zh'
                 ? `${amountLabel} + 每月 ${monthlyLabel}`
@@ -430,41 +431,41 @@ export default function ReplayExperience({
         </div>
 
         <div className="min-w-0 text-center">
-          <h1 className="truncate text-xl font-black leading-snug tracking-tight sm:text-3xl">
+          <h1 className="line-clamp-2 text-xl font-black leading-snug tracking-tight sm:text-3xl">
             {locale === 'zh' ? (
               monthly ? (
                 <>
                   假如你在 {year}年 买入 {amountLabel}{' '}
-                  <span className="text-white/45" style={{}}>{stock.zh}</span>
+                  <span className="text-ink-950/45" style={{}}>{stock.zh}</span>
                   ，每月再投 {monthlyLabel}
                 </>
               ) : (
                 <>
                   假如你在 {year}年 买入 {amountLabel}{' '}
-                  <span className="text-white/45" style={{}}>{stock.zh}</span>
+                  <span className="text-ink-950/45" style={{}}>{stock.zh}</span>
                 </>
               )
             ) : monthly ? (
               <>
                 {amountLabel} of{' '}
-                <span className="text-white/45" style={{}}>{stock.en}</span> in{' '}
+                <span className="text-ink-950/45" style={{}}>{stock.en}</span> in{' '}
                 {year}, plus {monthlyLabel}/mo
               </>
             ) : (
               <>
                 If you bought {amountLabel} of{' '}
-                <span className="text-white/45" style={{}}>{stock.en}</span> in{' '}
+                <span className="text-ink-950/45" style={{}}>{stock.en}</span> in{' '}
                 {year}
               </>
             )}
           </h1>
-          <p className="mt-1 truncate text-sm font-semibold text-white/55">
+          <p className="mt-1 truncate text-sm font-semibold text-ink-950/55">
             {meme || (monthly ? t.dcaSubtitle : t.holdForever)}
           </p>
         </div>
 
         <div className="pt-0.5 text-right">
-          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/35">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-950/35">
             {t.returnRate}
           </div>
           <div
@@ -478,7 +479,7 @@ export default function ReplayExperience({
             <span ref={plRef} className="tabular-nums">
               +0万
             </span>
-            <span ref={dateRef} className="text-white/40 tabular-nums">
+            <span ref={dateRef} className="text-ink-950/40 tabular-nums">
               {series.dates[input.start].slice(0, 4)}-
               {series.dates[input.start].slice(4, 6)}
             </span>
@@ -489,8 +490,8 @@ export default function ReplayExperience({
       {/* ════════ 电影感图表舞台(宽幅 + 盈亏双色流光边框) ════════ */}
       <div
         ref={boxRef}
-        className="relative aspect-[16/9] w-full overflow-hidden rounded-xl border border-white/10 sm:aspect-[2.2/1]"
-        style={{ background: '#0c0c0f' }}
+        className="relative aspect-[16/9] w-full overflow-hidden rounded-xl border border-ink-950/10 sm:aspect-[2.2/1]"
+        style={{ background: '#fbfbfc' }}
       >
         <canvas
           ref={canvasRef}
@@ -510,9 +511,9 @@ export default function ReplayExperience({
 
         {/* ════════ 终局结算战报: 背景压暗 + 弹簧卡 ════════ */}
         {stats && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
-            <div className="wi-pop w-full max-w-md rounded-3xl border border-white/12 bg-ink-900/95 p-7 text-center shadow-2xl">
-              <div className="mx-auto inline-flex rounded-full border border-white/15 px-4 py-1 font-mono text-[11px] uppercase tracking-[0.25em] text-white/50">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/60 p-4 backdrop-blur-sm">
+            <div className="wi-pop w-full max-w-md rounded-3xl border border-ink-950/10 bg-white/95 p-7 text-center shadow-2xl">
+              <div className="mx-auto inline-flex rounded-full border border-ink-950/15 px-4 py-1 font-mono text-[11px] uppercase tracking-[0.25em] text-ink-950/50">
                 {t.finalReturn}
               </div>
               <div
@@ -521,9 +522,9 @@ export default function ReplayExperience({
               >
                 <CountUp target={stats.returnPct} format={pct} />
               </div>
-              <p className="mt-3 text-sm text-white/60">
+              <p className="mt-3 text-sm text-ink-950/60">
                 {t.finalAssets}{' '}
-                <span className="font-bold text-white">
+                <span className="font-bold text-ink-950">
                   <CountUp target={stats.finalValue} format={(v) => money(v, locale)} duration={1300} />
                 </span>
                 （{stats.profit >= 0 ? t.profit : t.loss}{' '}
@@ -536,7 +537,7 @@ export default function ReplayExperience({
                 ）
               </p>
               {stats.invested != null && (
-                <p className="mt-1 text-xs text-white/50">
+                <p className="mt-1 text-xs text-ink-950/50">
                   {t.invested} {money(stats.invested, locale)}
                   {lumpFinal != null && (
                     <>
@@ -547,7 +548,7 @@ export default function ReplayExperience({
                   )}
                 </p>
               )}
-              <p className="mt-1 font-mono text-[11px] text-white/40">
+              <p className="mt-1 font-mono text-[11px] text-ink-950/40">
                 {t.statsLine(
                   Number(stats.years.toFixed(1)),
                   Number((stats.cagr * 100).toFixed(1)),
@@ -559,7 +560,7 @@ export default function ReplayExperience({
                   type="button"
                   onClick={shareImage}
                   disabled={shareBusy}
-                  className="wi-rise whitespace-nowrap rounded-xl bg-white px-2 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-white/90 active:scale-95 disabled:opacity-50"
+                  className="wi-rise whitespace-nowrap rounded-xl bg-ink-950 px-2 py-2.5 text-sm font-semibold text-white transition hover:bg-gain active:scale-95 disabled:opacity-50"
                 >
                   {shareBusy ? t.generating : t.genPoster}
                 </button>
@@ -568,7 +569,7 @@ export default function ReplayExperience({
                     type="button"
                     onClick={exportVideo}
                     disabled={videoPct != null}
-                    className="wi-rise whitespace-nowrap rounded-xl border border-white/15 px-2 py-2.5 text-sm font-semibold text-white/80 transition hover:border-white/30 active:scale-95 disabled:opacity-50"
+                    className="wi-rise whitespace-nowrap rounded-xl border border-ink-950/15 px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/30 active:scale-95 disabled:opacity-50"
                     style={{ animationDelay: '60ms' }}
                   >
                     {videoPct != null ? t.exporting(videoPct) : t.exportVideo}
@@ -577,7 +578,7 @@ export default function ReplayExperience({
                 <button
                   type="button"
                   onClick={shareLink}
-                  className="wi-rise whitespace-nowrap rounded-xl border border-white/15 px-2 py-2.5 text-sm font-semibold text-white/80 transition hover:border-white/30 active:scale-95"
+                  className="wi-rise whitespace-nowrap rounded-xl border border-ink-950/15 px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/30 active:scale-95"
                   style={{ animationDelay: '120ms' }}
                 >
                   {copied ? t.copied : t.copyLink}
@@ -585,7 +586,7 @@ export default function ReplayExperience({
                 <button
                   type="button"
                   onClick={restart}
-                  className="wi-rise whitespace-nowrap rounded-xl border border-white/15 px-2 py-2.5 text-sm font-semibold text-white/80 transition hover:border-white/30 active:scale-95"
+                  className="wi-rise whitespace-nowrap rounded-xl border border-ink-950/15 px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/30 active:scale-95"
                   style={{ animationDelay: '180ms' }}
                 >
                   {t.replayAgain}
@@ -601,8 +602,8 @@ export default function ReplayExperience({
 
       {/* ════════ 底部状态信息 ════════ */}
       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-        <span className="text-white/35">{t.simNote}</span>
-        <span ref={priceRef} className="font-mono text-white/35 tabular-nums">
+        <span className="text-ink-950/35">{t.simNote}</span>
+        <span ref={priceRef} className="font-mono text-ink-950/35 tabular-nums">
           {t.buyPriceNowPrice(
             usdPrice(series.rawCloses?.[input.start] ?? null),
             usdPrice(series.rawCloses?.[input.start] ?? null)
@@ -615,7 +616,7 @@ export default function ReplayExperience({
         <button
           type="button"
           onClick={() => (tRef.current >= 1 ? restart() : setPlaying((p) => !p))}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink-950/[0.06] text-ink-950 transition hover:bg-ink-950/[0.12] active:scale-95"
           aria-label={playing ? t.pause : t.play}
         >
           {tRef.current >= 1 || !playing ? (
@@ -637,10 +638,10 @@ export default function ReplayExperience({
           step={0.001}
           defaultValue={0}
           onChange={(e) => scrub(Number(e.target.value))}
-          className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/15"
+          className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-ink-950/15"
           aria-label={t.progressAria}
         />
-        <div className="flex shrink-0 overflow-hidden rounded-full border border-white/15" role="group" aria-label={t.speedGroup}>
+        <div className="flex shrink-0 overflow-hidden rounded-full border border-ink-950/15" role="group" aria-label={t.speedGroup}>
           {SPEEDS.map((s) => (
             <button
               key={s}
@@ -648,7 +649,7 @@ export default function ReplayExperience({
               onClick={() => setSpeed(s)}
               aria-pressed={speed === s}
               className={`px-2.5 py-1 text-xs font-semibold transition ${
-                speed === s ? 'bg-white/15 text-white' : 'text-white/50 hover:text-white/80'
+                speed === s ? 'bg-ink-950/10 text-ink-950' : 'text-ink-950/50 hover:text-ink-950/80'
               }`}
             >
               {s}x
@@ -658,7 +659,7 @@ export default function ReplayExperience({
         <button
           type="button"
           onClick={restart}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink-950/[0.06] text-ink-950 transition hover:bg-ink-950/[0.12] active:scale-95"
           aria-label={t.replayBtn}
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -667,7 +668,7 @@ export default function ReplayExperience({
           </svg>
         </button>
       </div>
-      <p className="mt-2 text-center text-[10px] text-white/25">{t.kbdHint}</p>
+      <p className="mt-2 text-center text-[10px] text-ink-950/25">{t.kbdHint}</p>
     </div>
   );
 }
