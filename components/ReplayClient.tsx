@@ -37,6 +37,30 @@ export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
     let alive = true;
     setSeries(null);
     setError(null);
+    // 首次加载与 HTML 早取脚本(wi-early.js)共享同一 promise(谁先执行谁创建),
+    // 客户端导航/直开两种进入方式都只发一次请求; 失败 resolve null → 错误态
+    const earlyMap = ((window as { __wiData?: Record<string, Promise<Series | null>> }).__wiData ??=
+      {});
+    if (attempt === 0) {
+      earlyMap[key] ??= fetch(`/data/${key}.json`).then(
+        (r) => (r.ok ? r.json() : null),
+        () => null
+      ) as Promise<Series | null>;
+      const timer = window.setTimeout(() => {
+        if (alive) setError('load');
+      }, 15_000);
+      earlyMap[key].then((data) => {
+        window.clearTimeout(timer);
+        if (!alive) return;
+        if (data) setSeries(data);
+        else setError('load');
+      });
+      return () => {
+        alive = false;
+        window.clearTimeout(timer);
+      };
+    }
+    // 重试(attempt>0): 全新可中止请求, 不复用已失败的早取 promise
     // 15s 超时兜底: 连接僵死时转入可重试的失败态, 不无限挂在「载入历史数据…」
     const ctl = new AbortController();
     const timer = window.setTimeout(() => ctl.abort(), 15_000);

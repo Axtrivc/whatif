@@ -35,7 +35,7 @@ const zh = {
     `${year} 年投入 ${amount} · 一直持有到今天`,
   dataMissing: '数据文件缺失，请先运行',
   yearAria: '年份',
-  customAmountAria: '自定义本金金额（美元）',
+  customAmountAria: '自定义本金金额',
 
   hotPicks: '热门穿越 · 真实数据',
   allAssets: '全部标的',
@@ -159,7 +159,7 @@ const en: Dict = {
     `Invested ${ccyPrefix}${amount} in ${year} · held until today`,
   dataMissing: 'Data files missing. Run',
   yearAria: 'Year',
-  customAmountAria: 'Custom principal amount (USD)',
+  customAmountAria: 'Custom principal amount',
 
   hotPicks: 'Popular Journeys · Real Data',
   allAssets: 'All assets',
@@ -167,7 +167,7 @@ const en: Dict = {
   trustSince: 'Data from',
   trustSpan: 'Years spanned',
   presetPrincipal: 'Principal',
-  yearsLater: () => `years later`,
+  yearsLater: () => `yrs`,
   presetDcaTag: 'DCA',
 
   howItWorks: 'How it works',

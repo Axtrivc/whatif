@@ -213,3 +213,29 @@ input[type='range']:not(.wi-range)::-moz-range-thumb {
     animation: none;
   }
 }
+
+/* ── 触屏体验: 交互元素禁用双击缩放(快速连点按钮不再触发页面放大) ── */
+button,
+a,
+label,
+input[type='range'] {
+  touch-action: manipulation;
+}
+
+/* ── 粗指针(手机/平板)滑杆: 命中区加高、游标加宽便于手指拖拽;
+      轨道视觉粗细不变(渐变背景 clip 在 content 区, padding 只是命中区) ── */
+@media (pointer: coarse) {
+  input[type='range'].wi-range {
+    height: 26px;
+    padding-block: 6px;
+    background-clip: content-box;
+  }
+  input[type='range'].wi-range::-webkit-slider-thumb {
+    width: 14px;
+    height: 22px;
+  }
+  input[type='range'].wi-range::-moz-range-thumb {
+    width: 14px;
+    height: 22px;
+  }
+}

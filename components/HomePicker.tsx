@@ -68,6 +68,8 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
 
   // 恢复上次配置(挂载后同步, 避开 SSR 水合差); 越界配置按当前范围夹取
   useEffect(() => {
+    // 首次进站也预热初始标的(默认 msft): 用户调整年份/金额期间数据已在缓存, 开演秒出
+    if (stock) warm(stock.key);
     try {
       if (userPickedRef.current) return;
       const raw = localStorage.getItem(PREF_KEY);
@@ -89,11 +91,12 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
       if (typeof p.dca === 'boolean') setDca(p.dca);
       if (typeof p.amount === 'number' && p.amount >= 100) {
         setAmount(Math.round(p.amount));
-        setCustom('');
+        // 非预设值回填输入框 — 否则预设无高亮且输入框空白, 当前本金在界面上不可见
+        setCustom(AMOUNT_PRESETS.includes(p.amount) ? '' : t.amountLabel(Math.round(p.amount)));
       }
       if (typeof p.monthly === 'number' && p.monthly >= 10) {
         setMonthly(Math.round(p.monthly));
-        setCustomMonthly('');
+        setCustomMonthly(MONTHLY_PRESETS.includes(p.monthly) ? '' : t.amountLabel(Math.round(p.monthly)));
       }
     } catch {
       /* 存储坏数据/不可用: 用默认配置 */
@@ -167,7 +170,14 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
   return (
     <section className="mt-12 border-y border-ink-950/8 py-8">
       <div className="wi-eyebrow">{t.pickStock}</div>
-      <div className="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-7">
+      {/* 移动端: 中文 320px 时 2 列(3 列放不下 5 字中文名), 360px 起 3 列; 英文名更长, 2 列起步且桌面最多 5 列 */}
+      <div
+        className={`mt-3 grid gap-2 ${
+          locale === 'en'
+            ? 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-5'
+            : 'grid-cols-2 min-[360px]:grid-cols-3 sm:grid-cols-7'
+        }`}
+      >
         {available.map((s) => (
           <button
             key={s.key}
@@ -176,13 +186,17 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
             onMouseEnter={() => warm(s.key)}
             onFocus={() => warm(s.key)}
             aria-pressed={s.key === key}
-            className={`rounded-md border px-2 py-2.5 text-center transition active:scale-95 ${
+            className={`rounded-md border px-1.5 py-2.5 text-center transition active:scale-95 sm:px-2 ${
               s.key === key
                 ? 'border-ink-950 bg-ink-950 font-semibold text-white'
                 : 'border-ink-950/15 bg-white text-ink-950/60 hover:border-ink-950/40 hover:text-ink-950'
             }`}
           >
-            <div className="truncate text-sm leading-none" title={locale === 'zh' ? s.zh : s.en}>
+            {/* 英文名最长 18 字符(Berkshire Hathaway), 用 12px 才能在 5 列网格完整显示 */}
+            <div
+              className={`truncate leading-none ${locale === 'en' ? 'text-xs' : 'text-sm'}`}
+              title={locale === 'zh' ? s.zh : s.en}
+            >
               {locale === 'zh' ? s.zh : s.en}
             </div>
             <div className="mt-1 font-mono text-[9px] uppercase opacity-60">{s.symbol}</div>
@@ -226,7 +240,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
           type="button"
           onClick={() => setDca(false)}
           aria-pressed={!dca}
-          className={`border-r border-ink-950/10 px-4 py-1.5 text-xs font-bold transition ${
+          className={`border-r border-ink-950/10 px-4 py-2.5 text-xs font-bold transition sm:py-1.5 ${
             !dca ? 'bg-ink-950 text-white' : 'text-ink-950/50 hover:text-ink-950/80'
           }`}
         >
@@ -236,9 +250,9 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
           type="button"
           onClick={() => setDca(true)}
           aria-pressed={dca}
-            className={`px-4 py-1.5 text-xs font-bold transition ${
-              dca ? 'bg-dca/20 text-dca' : 'text-ink-950/50 hover:text-ink-950/80'
-            }`}
+          className={`px-4 py-2.5 text-xs font-bold transition sm:py-1.5 ${
+            dca ? 'bg-dca/20 text-dca' : 'text-ink-950/50 hover:text-ink-950/80'
+          }`}
         >
           {t.pickModeDca}
         </button>
@@ -289,7 +303,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
                   setMonthly(m);
                   setCustomMonthly('');
                 }}
-                className={`rounded-md border px-3.5 py-1.5 font-mono text-xs transition active:scale-95 ${
+                className={`rounded-md border px-3.5 py-2 font-mono text-xs transition active:scale-95 sm:py-1.5 ${
                   !customMonthly && monthly === m
                     ? 'border-dca bg-dca font-semibold text-ink-950'
                     : 'border-ink-950/15 bg-white text-ink-950/60 hover:border-dca/50 hover:text-dca'

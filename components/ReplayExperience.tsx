@@ -90,6 +90,7 @@ export default function ReplayExperience({
   const finaleTimerRef = useRef(0); // 终点停留计时器
   const maxMultRef = useRef(1); // 里程碑检测: 历史最高倍数
   const underRef = useRef(false); // 里程碑检测: 曾跌破本金
+  const ariaDateRef = useRef(''); // aria-valuetext 上次日期(月粒度变化才写, 免每帧刷无障碍树)
 
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
@@ -223,8 +224,12 @@ export default function ReplayExperience({
           // --p 驱动滑杆已播放段填充(时间轴游标语言), 与拖动手感一致
           scrubRef.current.style.setProperty('--p', tt.toFixed(4));
         }
-        // 读屏用户实时获知当前回放日期
-        scrubRef.current.setAttribute('aria-valuetext', dateYM(series.dates[i]));
+        // 读屏用户实时获知当前回放日期(月粒度去重, 避免每帧 setAttribute 刷无障碍树)
+        const ariaDate = dateYM(series.dates[i]);
+        if (ariaDate !== ariaDateRef.current) {
+          ariaDateRef.current = ariaDate;
+          scrubRef.current.setAttribute('aria-valuetext', ariaDate);
+        }
       }
     },
     [input, series, reduced, locale, t, compareSeries]
@@ -514,9 +519,10 @@ export default function ReplayExperience({
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-5">
-      {/* ════════ 顶部状态栏(HUD 分区): 左(返回+本金) / 中(大标题+梗) / 右(战报区) ════════ */}
-      <header className="grid grid-cols-[minmax(56px,auto)_1fr_minmax(88px,auto)] items-start gap-2 border-b border-ink-950/8 pb-4 sm:grid-cols-[minmax(90px,auto)_1fr_minmax(150px,auto)] sm:gap-3">
-        <div className="flex flex-col gap-1.5 pt-1">
+      {/* ════════ 顶部状态栏(HUD 分区): 桌面三栏 左(返回+本金)/中(大标题+梗)/右(战报区);
+          移动端两行 — 首行[返回+本金 | 战报], 标题独占次行全宽, 不再被两侧挤压截断 ════════ */}
+      <header className="grid grid-cols-[1fr_auto] items-start gap-x-3 gap-y-2 border-b border-ink-950/8 pb-4 sm:grid-cols-[minmax(90px,auto)_1fr_minmax(150px,auto)] sm:gap-3">
+        <div className="flex min-w-0 flex-col gap-1.5 self-start pt-1 sm:col-start-1 sm:row-start-1 sm:row-span-2">
           <Link
             href={homeHref}
             className="inline-flex items-center gap-1 text-xs text-ink-950/50 transition hover:text-ink-950"
@@ -535,8 +541,8 @@ export default function ReplayExperience({
           </span>
         </div>
 
-        <div className="min-w-0 text-center">
-          <h1 className="line-clamp-2 text-xl font-black leading-snug tracking-tight sm:text-3xl">
+        <div className="col-span-2 min-w-0 text-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+          <h1 className="line-clamp-2 text-xl font-black leading-snug tracking-tight sm:line-clamp-none sm:text-3xl">
             {locale === 'zh' ? (
               monthly ? (
                 <>
@@ -569,7 +575,7 @@ export default function ReplayExperience({
           </p>
         </div>
 
-        <div className="pt-0.5 text-right">
+        <div className="col-start-2 row-start-1 pt-0.5 text-right sm:col-start-3 sm:row-start-1">
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-950/35">
             {t.returnRate}
           </div>
@@ -614,10 +620,12 @@ export default function ReplayExperience({
           }}
         />
 
-        {/* ════════ 终局结算战报: 背景压暗 + 弹簧卡 ════════ */}
+        {/* ════════ 终局结算战报: 背景压暗 + 弹簧卡 ════════
+            移动/平板画布(16/9 ≈ 200px)装不下整卡会裁掉按钮 → 小屏升级为全屏弹层,
+            lg+(宽画布)回到画布内嵌; 卡身限高可滚, 兜底超矮视口(折叠屏外屏/横屏) */}
         {stats && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 p-4 backdrop-blur-sm">
-            <div className="wi-pop w-full max-w-md rounded-lg border border-ink-950/12 bg-white/95 p-7 text-center shadow-[0_24px_64px_-24px_rgba(17,17,20,0.35)]" role="status">
+          <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white/70 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-sm lg:absolute lg:z-auto lg:p-4 lg:pb-4">
+            <div className="wi-pop max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-lg border border-ink-950/12 bg-white/95 p-5 text-center shadow-[0_24px_64px_-24px_rgba(17,17,20,0.35)] lg:max-h-none lg:overflow-visible lg:p-7" role="status">
               <div className="mx-auto inline-flex rounded-[4px] border border-ink-950/15 bg-ink-950/[0.03] px-4 py-1 font-mono text-[11px] uppercase tracking-[0.25em] text-ink-950/50">
                 {t.finalReturn}
               </div>
@@ -727,8 +735,8 @@ export default function ReplayExperience({
         </span>
       </div>
 
-      {/* ════════ 播放控制(时间轴控制台) ════════ */}
-      <div className="mt-3 flex items-center gap-3">
+      {/* ════════ 播放控制(时间轴控制台; 移动端收窄间距/隐重播键, 给进度条让出拖拽宽度) ════════ */}
+      <div className="mt-3 flex items-center gap-2 sm:gap-3">
         <button
           type="button"
           onClick={() => (tRef.current >= 1 ? restart() : setPlaying((p) => !p))}
@@ -772,7 +780,7 @@ export default function ReplayExperience({
               type="button"
               onClick={() => setSpeed(s)}
               aria-pressed={speed === s}
-              className={`border-r border-ink-950/10 px-2.5 py-1 font-mono text-xs font-semibold transition last:border-r-0 ${
+              className={`border-r border-ink-950/10 px-2 py-1.5 font-mono text-xs font-semibold transition last:border-r-0 sm:px-2.5 sm:py-1 ${
                 speed === s ? 'bg-ink-950 text-white' : 'text-ink-950/50 hover:text-ink-950/80'
               }`}
             >
@@ -780,10 +788,11 @@ export default function ReplayExperience({
             </button>
           ))}
         </div>
+        {/* 重播键: 桌面专属(移动端播放键在终点即重播, 结算卡也有再测一次, 让位给进度条) */}
         <button
           type="button"
           onClick={restart}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-ink-950/12 bg-white text-ink-950 transition hover:border-ink-950/40 active:scale-95"
+          className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md border border-ink-950/12 bg-white text-ink-950 transition hover:border-ink-950/40 active:scale-95 sm:flex"
           aria-label={t.replayBtn}
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -792,7 +801,7 @@ export default function ReplayExperience({
           </svg>
         </button>
       </div>
-      <p className="mt-2 text-center text-[10px] text-ink-950/35">{t.kbdHint}</p>
+      <p className="mt-2 hidden text-center text-[10px] text-ink-950/35 sm:block">{t.kbdHint}</p>
     </div>
   );
 }

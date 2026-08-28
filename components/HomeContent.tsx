@@ -164,20 +164,20 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
                     p.monthly ? 'bg-dca' : 'bg-gain'
                   } opacity-60 transition group-hover:opacity-100`}
                 />
-                <div className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate text-sm font-bold">
-                    {p.year} · {p.name}
-                  </span>
+                {/* 标题拆两行: 年份+代码/模式一行, 名称独占一行 — "2015 · 超威半导体"这类长名在 2 列卡里必截断 */}
+                <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-ink-950/35">
+                  <span className="tabular-nums">{p.year}</span>
                   {p.monthly ? (
-                    <span className="shrink-0 rounded border border-dca/40 px-1.5 py-0.5 text-[10px] font-medium text-dca">
+                    <span className="rounded border border-dca/40 px-1.5 py-0.5 font-sans text-[10px] font-medium normal-case tracking-normal text-dca">
                       {t.presetDcaTag}
                     </span>
                   ) : (
-                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-ink-950/35">
-                      {p.symbol}
-                    </span>
+                    <span>{p.symbol}</span>
                   )}
                 </div>
+                {/* 名称允许自然换行: 超长英文名(Berkshire Hathaway 18 字符)任何固定字号总有临界宽度,
+                    换行 + grid 拉齐同行卡高, 全断点完整显示 */}
+                <div className="mt-1.5 break-words text-sm font-bold leading-snug">{p.name}</div>
                 <div
                   className={`mt-2 font-mono text-xl font-bold tracking-tight tabular-nums ${
                     up ? 'text-gain' : 'text-loss'
@@ -185,7 +185,8 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
                 >
                   {p.multText}
                 </div>
-              <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-ink-950/45">
+              {/* 说明行 3 行兜底: 320-390px 窄卡(内容 ~104-129px)下中文 2 行也会截掉终值 */}
+              <div className="mt-0.5 line-clamp-3 text-[11px] leading-4 text-ink-950/45">
                 {locale === 'zh'
                   ? p.monthly
                     ? `首笔 ${moneyZh(p.amount)} + 每月 ${moneyZh(p.monthly)} → ${p.years} 年 · ${p.finalEn}`
@@ -208,6 +209,7 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
             <Link
               key={s.key}
               href={lp(locale, `/p/${s.key}`)}
+              prefetch={false}
               className="text-sm text-ink-950/60 underline decoration-ink-950/15 underline-offset-4 transition hover:text-ink-950 hover:decoration-ink-950/40"
             >
               {locale === 'zh' ? s.zh : s.en}{' '}

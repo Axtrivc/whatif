@@ -37,6 +37,9 @@ function loadTicker(): Promise<TickerItem[]> {
   return tickerCache;
 }
 
+// chunk 求值即发起请求(先于 React 挂载), 失败置空缓存供组件重试
+loadTicker().catch(() => {});
+
 export default function TickerTape() {
   const [items, setItems] = useState<TickerItem[]>([]);
   const pathname = usePathname();
@@ -52,8 +55,6 @@ export default function TickerTape() {
       alive = false;
     };
   }, []);
-
-  if (!items.length) return null;
 
   const row = (dup: number) => (
     <div className="flex shrink-0 items-center" aria-hidden={dup === 1}>
@@ -77,6 +78,7 @@ export default function TickerTape() {
     </div>
   );
 
+  // 常驻外框(数据未到时占位同高): 避免 ~200-500ms 后走马灯撑开把下方控制条顶下去(CLS)
   return (
     <div className="relative mt-3 flex items-stretch overflow-hidden rounded-lg border border-ink-950/10 bg-white">
       {/* 左端实时信号灯(行情屏语言) */}
@@ -87,11 +89,15 @@ export default function TickerTape() {
         </span>
       </div>
       {/* 两侧渐隐用 mask 而非色块渐变, 与全页点阵底纹不打架 */}
-      <div className="overflow-hidden py-2 [mask-image:linear-gradient(to_right,transparent,black_20px,black_calc(100%-20px),transparent)]">
-        <div className="wi-marquee flex w-max">
-          {row(0)}
-          {row(1)}
-        </div>
+      <div className="min-w-0 flex-1 overflow-hidden py-2 [mask-image:linear-gradient(to_right,transparent,black_20px,black_calc(100%-20px),transparent)]">
+        {items.length ? (
+          <div className="wi-marquee flex w-max">
+            {row(0)}
+            {row(1)}
+          </div>
+        ) : (
+          <div className="h-4" aria-hidden />
+        )}
       </div>
     </div>
   );

@@ -115,6 +115,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
           <Link
             key={r.year}
             href={replayHref(r.year)}
+            prefetch={false}
             className={`rounded-md border px-4 py-2 font-mono text-sm transition active:scale-95 ${
               r.year === best.year
                 ? 'border-gain bg-gain font-semibold text-white'
@@ -131,33 +132,33 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-ink-950/5 text-left text-xs uppercase tracking-wider text-ink-950/40">
-              <th className="px-4 py-3 font-semibold">{t.colYear}</th>
-              <th className="px-4 py-3 text-right font-semibold">{t.colResult(prefix)}</th>
-              <th className="px-4 py-3 text-right font-semibold">{t.colMultiple}</th>
-              <th className="hidden px-4 py-3 text-right font-semibold sm:table-cell">{t.colCagr}</th>
+              <th className="px-3 py-3 font-semibold sm:px-4">{t.colYear}</th>
+              <th className="px-3 py-3 text-right sm:px-4 font-semibold">{t.colResult(prefix)}</th>
+              <th className="px-3 py-3 text-right sm:px-4 font-semibold">{t.colMultiple}</th>
+              <th className="hidden px-3 py-3 text-right sm:px-4 font-semibold sm:table-cell">{t.colCagr}</th>
             </tr>
           </thead>
           <tbody>
             {table.map((r) => (
               <tr key={r.year} className="border-t border-ink-950/5 transition hover:bg-ink-950/5">
-                <td className="px-4 py-3">
-                  <Link href={replayHref(r.year)} className="font-mono font-bold hover:text-ink-950">
+                <td className="px-3 py-3 sm:px-4">
+                  <Link href={replayHref(r.year)} prefetch={false} className="font-mono font-bold hover:text-ink-950">
                     {r.year}
                   </Link>
                 </td>
-                <td className="px-4 py-3 text-right font-mono">
-                  <Link href={replayHref(r.year)} className="hover:text-ink-950">
+                <td className="px-3 py-3 text-right sm:px-4 font-mono">
+                  <Link href={replayHref(r.year)} prefetch={false} className="hover:text-ink-950">
                     {moneyC(r.stats.finalValue)}
                   </Link>
                 </td>
                 <td
-                  className={`px-4 py-3 text-right font-mono font-bold ${
+                  className={`px-3 py-3 text-right sm:px-4 font-mono font-bold ${
                     r.stats.returnPct >= 0 ? 'text-profit' : 'text-loss'
                   }`}
                 >
                   {multiple(r.stats.multiple)}
                 </td>
-                <td className="hidden px-4 py-3 text-right font-mono text-ink-950/60 sm:table-cell">
+                <td className="hidden px-3 py-3 text-right sm:px-4 font-mono text-ink-950/60 sm:table-cell">
                   {(r.stats.cagr * 100).toFixed(1)}%
                 </td>
               </tr>
@@ -203,30 +204,30 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-ink-950/[0.04] text-left font-mono text-[11px] uppercase tracking-[0.14em] text-ink-950/40">
-                      <th className="px-4 py-3 font-semibold">{t.dcaColMode}</th>
-                      <th className="hidden px-4 py-3 text-right font-semibold sm:table-cell">{t.dcaColInvested}</th>
-                      <th className="px-4 py-3 text-right font-semibold">{t.dcaColFinal}</th>
-                      <th className="px-4 py-3 text-right font-semibold">{t.dcaColReturn}</th>
+                      <th className="px-3 py-3 font-semibold sm:px-4">{t.dcaColMode}</th>
+                      <th className="hidden px-3 py-3 text-right sm:px-4 font-semibold sm:table-cell">{t.dcaColInvested}</th>
+                      <th className="px-3 py-3 text-right sm:px-4 font-semibold">{t.dcaColFinal}</th>
+                      <th className="px-3 py-3 text-right sm:px-4 font-semibold">{t.dcaColReturn}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.mode} className="border-t border-ink-950/5 transition hover:bg-ink-950/5">
-                        <td className="px-4 py-3 font-semibold">
+                        <td className="px-3 py-3 font-semibold sm:px-4">
                           {r.dca ? (
                             <span className="text-dca">{r.mode}</span>
                           ) : (
                             <span className="text-gain">{r.mode}</span>
                           )}
                         </td>
-                        <td className="hidden px-4 py-3 text-right font-mono text-ink-950/60 sm:table-cell">
+                        <td className="hidden px-3 py-3 text-right sm:px-4 font-mono text-ink-950/60 sm:table-cell">
                           {moneyC(r.invested)}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono">
+                        <td className="px-3 py-3 text-right sm:px-4 font-mono">
                           {moneyC(r.s.finalValue)}
                         </td>
                         <td
-                          className={`px-4 py-3 text-right font-mono font-bold ${
+                          className={`px-3 py-3 text-right sm:px-4 font-mono font-bold ${
                             r.s.returnPct >= 0 ? 'text-profit' : 'text-loss'
                           }`}
                         >
@@ -266,6 +267,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
             <Link
               key={s.key}
               href={lp(locale, `/p/${s.key}`)}
+              prefetch={false}
               className="rounded-md bg-ink-950/[0.05] px-4 py-2 text-sm text-ink-950/70 transition hover:bg-ink-950/10"
             >
               {(locale === 'zh' ? s.zh : s.en) || s.en} {s.symbol}
