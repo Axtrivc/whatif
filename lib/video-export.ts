@@ -8,7 +8,7 @@
  * 提高时间倍率(采样同一条渲染曲线, 只是 t 推进更快)。
  * 降级: VideoEncoder 不可用(旧浏览器/Firefox)时调用方隐藏入口。
  */
-import type { ArrayBufferTarget as Mp4ArrayBufferTarget, Muxer as Mp4Muxer } from 'mp4-muxer';
+import type { ArrayBufferTarget as Mp4ArrayBufferTarget } from 'mp4-muxer';
 import { durationFor, type ReplayInput } from '@/lib/engine';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
 import type { Locale } from '@/lib/i18n';
@@ -61,10 +61,10 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
   });
 
   // 编码器错误在回调里抛出不会传给 await 链, 先捕获再在循环/收尾处检查
-  let encError: Error | null = null;
-  const enc = new (window as any).VideoEncoder({
-    output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
-    error: (e: Error) => {
+  let encError: DOMException | null = null;
+  const enc = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: (e) => {
       encError = e;
     },
   });
@@ -100,7 +100,7 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
       ccy,
       compareSeries,
     });
-    const frame = new (window as any).VideoFrame(cv, {
+    const frame = new VideoFrame(cv, {
       timestamp: Math.round(f * usPerFrame),
       duration: Math.round(usPerFrame),
     });

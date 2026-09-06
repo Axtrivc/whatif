@@ -1,5 +1,5 @@
 /** 数值与日期格式化(引擎/HUD/分享卡共用, 必须纯函数) */
-import { ccyPrefix } from './tokens';
+import { ccyPrefix } from './tokens.ts';
 
 const trim = (x: number, d: number): string => {
   let s = x.toFixed(d);
