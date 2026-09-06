@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { computeStats, dcaInvested, dcaSeries, durationFor, investedSeries, type ReplayInput } from '@/lib/engine';
+import { computeStats, dcaInvested, dcaSeries, durationFor, indexAtT, investedSeries, type ReplayInput } from '@/lib/engine';
 import { dateYM, fmtPrice, money, pct, profit } from '@/lib/format';
 import { dict, type Locale } from '@/lib/i18n';
 import { rawClosesOf, startIndexForYear, type Series, type StockMeta } from '@/lib/stocks';
@@ -177,7 +177,7 @@ export default function ReplayExperience({
 
       // 右上角战报 + 底部价格直写
       const i0 = input.start;
-      const i = Math.min(input.end, i0 + Math.floor(tt * (input.end - i0 + 1)));
+      const i = indexAtT(input, tt);
       // DCA 模式: 资产与累计投入都查引擎缓存序列; lump-sum 用比值法
       let value: number;
       let putIn: number;
@@ -272,7 +272,7 @@ export default function ReplayExperience({
         return;
       }
       // 里程碑检测(回本 / 首破整数倍) → 渲染层闪光; DCA 相对累计投入
-      const i = Math.min(input.end, input.start + Math.floor(nt * (input.end - input.start + 1)));
+      const i = indexAtT(input, nt);
       let m: number;
       if (input.monthly) {
         const j = i - input.start;
@@ -420,7 +420,8 @@ export default function ReplayExperience({
     a.href = url;
     a.download = name;
     a.click();
-    URL.revokeObjectURL(url);
+    // 延迟吊销: 同步 revoke 在部分浏览器(尤其大文件/慢盘)会截断刚发起的下载
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
   };
 
   const shareImage = async () => {

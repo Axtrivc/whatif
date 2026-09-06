@@ -190,9 +190,9 @@ for (const [key, secids, minPoints, ,] of targets) {
         const [d, c] = row.split(',');
         map.set(d.replace(/-/g, ''), Number(c));
       }
-      const raw = dates.map((d) => map.get(d) ?? null);
-      // 与后复权完全一致(无分红/未除权)时省略该字段, 数据文件体积约减半; 展示端回退 closes
-      if (raw.some((v, i) => v !== closes[i])) payload.rawCloses = raw;
+      // 与后复权序列按日期对齐; 完全一致(无分红/未除权)时省略该字段, 数据文件体积约减半; 展示端回退 closes
+      const aligned = dates.map((d) => map.get(d) ?? null);
+      if (aligned.some((v, i) => v !== closes[i])) payload.rawCloses = aligned;
     }
     await writeFile(path.join(outDir, `${key}.json`), JSON.stringify(payload));
     manifest[key] = { first: payload.first, last: payload.last, points: payload.points };

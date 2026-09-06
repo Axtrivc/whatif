@@ -47,12 +47,12 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
     return s ? (locale === 'zh' ? s.zh : s.en) : k;
   };
 
-  // 每个标的可选年份范围
+  // 每个标的可选年份范围(26 个 JSON 并行读, 构建期省一轮串行 IO)
   const ranges: Record<string, { first: number; last: number }> = {};
   let latestData = ''; // 最新一条行情日期 → 页脚"数据截至"信任信号
   let earliestData = '99991231'; // 最早一条行情日期 → 英雄区数据条
-  for (const s of STOCKS) {
-    const series = await loadSeries(s.key);
+  const loaded = await Promise.all(STOCKS.map(async (s) => [s, await loadSeries(s.key)] as const));
+  for (const [s, series] of loaded) {
     if (!series) continue;
     ranges[s.key] = {
       first: Number(series.first.slice(0, 4)),

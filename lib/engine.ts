@@ -37,6 +37,9 @@ export interface ReplayStats {
  *  按 input 身份 WeakMap 缓存(渲染帧内/HUD 反复调用, 勿修改返回数组)。 */
 const seriesCache = new WeakMap<ReplayInput, Float64Array>();
 
+/** 月份序号(YYYYMM → 线性可比的月编号), 用于"每月首个交易日"注入点判定 */
+const monthSeq = (d: string): number => +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
+
 export function dcaSeries(input: ReplayInput): Float64Array {
   const hit = seriesCache.get(input);
   if (hit) return hit;
@@ -54,8 +57,7 @@ export function dcaSeries(input: ReplayInput): Float64Array {
   let injectedMonth = -1; // 已注入的月份(相对 start 的月序号), -1 = 尚未注入首笔
   for (let j = 0; j <= n; j++) {
     const i = start + j;
-    const d = dates[i];
-    const m = +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
+    const m = monthSeq(dates[i]);
     if (injectedMonth < m) {
       injectedMonth = m;
       shares += (j === 0 ? amount : monthly) / closes[i];
@@ -84,8 +86,7 @@ export function investedSeries(input: ReplayInput): Float64Array {
   let months = 0;
   let lastM = -1;
   for (let j = 0; j <= n; j++) {
-    const d = dates[start + j];
-    const m = +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
+    const m = monthSeq(dates[start + j]);
     if (lastM < m) {
       lastM = m;
       months++;
@@ -103,8 +104,7 @@ export function dcaInvested(input: ReplayInput): number {
   let months = 0;
   let lastM = -1;
   for (let i = start; i <= end; i++) {
-    const d = dates[i];
-    const m = +d.slice(0, 4) * 12 + (+d.slice(4, 6) - 1);
+    const m = monthSeq(dates[i]);
     if (lastM < m) {
       lastM = m;
       months++;
@@ -117,7 +117,8 @@ export function dcaInvested(input: ReplayInput): number {
 export function computeStats(input: ReplayInput): ReplayStats {
   const { dates, start, end } = input;
   const series = dcaSeries(input);
-  const invested = input.monthly ? dcaInvested(input) : input.amount;
+  // 累计投入复用 investedSeries 缓存(渲染层已建), 不再单独扫一遍日期序列
+  const invested = input.monthly ? investedSeries(input)[end - start] : input.amount;
   let peak = -Infinity;
   let peakIdx = start;
   let maxDD = 0;
