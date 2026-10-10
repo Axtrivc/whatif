@@ -281,3 +281,21 @@ test('浮点进位: 单笔份额往返精确回本金; 多笔累加估值偏差�
   assert.notEqual(v, 1000 / 3);
   assert.ok(Math.abs(v - 1000 / 3) < 1e-12);
 });
+
+test('跨年注入: monthSeq 年份项保证 12月→1月 单调, 1 月首日照常注入不漏注', () => {
+  // 2020-11 两日 + 2020-12 两日 + 2021-01 两日; 若年份项被去掉,
+  // monthSeq(20210104)=0 < monthSeq(20201231)=11, 1 月注入被静默跳过 → 全部断言失败
+  const input = mk(
+    ['20201130', '20201201', '20201231', '20210104', '20210105'],
+    [10, 20, 10, 5, 10],
+    { amount: 1000, monthly: 500 }
+  );
+  // j0 注入 1000@10=100份; j1 12月首日 +500/20=25份→125份×20;
+  // j3 2021-01 首日 +500/5=100份→225份×5; j4 225×10
+  assert.deepEqual([...dcaSeries(input)], [1000, 2500, 1250, 1125, 2250]);
+  assert.deepEqual([...investedSeries(input)], [1000, 1500, 1500, 2000, 2000]);
+  assert.equal(dcaInvested(input), 2000); // 3 个月: 1000 + 500×2
+  const stats = computeStats(input);
+  assert.equal(stats.finalValue, 2250);
+  assert.ok(Math.abs(stats.returnPct - 2250 / 2000 + 1) < 1e-12);
+});

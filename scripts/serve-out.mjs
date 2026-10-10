@@ -1,7 +1,8 @@
-/** 轻量静态服务(仅本地预览 out/ 用): node scripts/serve-out.mjs [port] */
+/** 轻量静态服务(仅本地预览 out/ 用): node scripts/serve-out.mjs [port]
+ *  只绑 127.0.0.1 — 构建产物不应暴露到局域网 */
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, sep } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..', 'out');
 const PORT = Number(process.argv[2]) || 3112;
@@ -17,13 +18,16 @@ const MIME = {
   '.xml': 'application/xml',
 };
 
+// 目录穿越守卫: 前缀比较必须带上分隔符, 否则兄弟目录(out-x/…)也能通过
+const INSIDE = (p) => p === ROOT || p.startsWith(ROOT + sep);
+
 createServer(async (req, res) => {
   let path = '';
   try {
     path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     if (path.endsWith('/')) path += 'index.html';
     const file = normalize(join(ROOT, path));
-    if (!file.startsWith(ROOT)) throw new Error('traversal');
+    if (!INSIDE(file)) throw new Error('traversal');
     const data = await readFile(file);
     res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
     res.end(data);
@@ -36,7 +40,7 @@ createServer(async (req, res) => {
     }
     candidates.push(join(ROOT, '404.html'));
     for (const fallback of candidates) {
-      if (!fallback.startsWith(ROOT)) continue; // 与上方同款目录穿越守卫
+      if (!INSIDE(fallback)) continue; // 与上方同款目录穿越守卫
       try {
         const data = await readFile(fallback);
         res.writeHead(fallback.endsWith('404.html') ? 404 : 200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -47,4 +51,4 @@ createServer(async (req, res) => {
     res.writeHead(500);
     res.end('boom');
   }
-}).listen(PORT, () => console.log(`serving out/ on http://localhost:${PORT}`));
+}).listen(PORT, '127.0.0.1', () => console.log(`serving out/ on http://127.0.0.1:${PORT}`));

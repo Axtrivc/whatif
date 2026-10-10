@@ -1,4 +1,5 @@
 import HomeContent from '@/components/HomeContent';
+import { SITE_URL } from '@/lib/site';
 import type { Metadata } from 'next';
 
 export const revalidate = false;
@@ -26,7 +27,7 @@ const JSONLD = JSON.stringify({
   '@type': 'WebSite',
   name: 'What If You Had Bought · WhatIf',
   alternateName: 'WhatIf',
-  url: 'https://whatif.axtrivc.com/en/',
+  url: `${SITE_URL}/en/`,
   inLanguage: 'en',
   description:
     'Pick a stock, a year, and an amount, then replay the compounding journey of long-term holding day by day. Historical simulation, for reference only.',

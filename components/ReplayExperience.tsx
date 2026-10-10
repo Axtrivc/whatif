@@ -8,6 +8,7 @@ import { dict, lp, type Locale } from '@/lib/i18n';
 import { rawClosesOf, startIndexForYear, type Series, type StockMeta } from '@/lib/stocks';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
 import { GAIN, LOSS } from '@/lib/tokens';
+import { SITE_HOST } from '@/lib/site';
 import { buildShareImage } from '@/components/ShareCard';
 import { exportReplayVideo, videoExportSupported } from '@/lib/video-export';
 import TickerTape from '@/components/TickerTape';
@@ -186,7 +187,7 @@ export default function ReplayExperience({
         ts: performance.now(),
         input,
         smooth: smoothRef.current,
-        watermark: 'whatif.axtrivc.com',
+        watermark: SITE_HOST,
         reduced,
         locale,
         ccy: stock.ccy,

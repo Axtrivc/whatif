@@ -1,11 +1,10 @@
 import type { Metadata, Viewport } from 'next';
 import HtmlLang from '@/components/HtmlLang';
+import { SITE_URL } from '@/lib/site';
 import './globals.css';
 
-export const SITE = 'whatif.axtrivc.com';
-
 export const metadata: Metadata = {
-  metadataBase: new URL(`https://${SITE}`),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: '假如当时买了 · WhatIf — 投资回放动画',
     template: '%s · WhatIf',

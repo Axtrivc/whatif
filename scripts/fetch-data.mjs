@@ -12,6 +12,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
 const API = 'https://push2his.eastmoney.com/api/qt/stock/kline/get';
@@ -88,13 +89,63 @@ function curlJson(url, { ua = 'curl/8' } = {}) {
   }
 }
 
+// ── 真浏览器抓取回退 ──
+// 东财 WAF 会在 TLS 指纹层掐掉非浏览器客户端: curl(schannel)/node undici 均在
+// "服务端发起重协商→断连"处死掉(HTTP 000), 但真实 Chromium 指纹可通过。
+// Playwright 取本机缓存路径(绝对 require, 仅作抓取工具, 不进依赖); 模块不可用
+// 时 browserJson 永久降级返回 null, 脚本退回纯 curl 模式并如实计失败。
+let browserCtx = null;
+let browserBroken = false;
+async function browserJson(url) {
+  if (browserBroken) return null;
+  try {
+    if (!browserCtx) {
+      const { chromium } = createRequire(import.meta.url)(
+        'C:/Users/leecl/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright'
+      );
+      const browser = await chromium.launch();
+      browserCtx = await browser.newContext();
+    }
+    const page = await browserCtx.newPage();
+    try {
+      await page.goto(url, { timeout: 25_000, waitUntil: 'domcontentloaded' });
+      const txt = await page.evaluate(() => document.body?.innerText ?? '');
+      return JSON.parse(txt);
+    } finally {
+      await page.close().catch(() => {});
+    }
+  } catch (e) {
+    const msg = String(e?.message || e);
+    console.log(`    浏览器抓取失败: ${msg.slice(0, 80)}`);
+    if (/Cannot find|MODULE_NOT_FOUND/i.test(msg)) browserBroken = true;
+    return null;
+  }
+}
+async function closeBrowser() {
+  if (!browserCtx) return;
+  try {
+    await browserCtx.browser()?.close();
+  } catch {}
+  browserCtx = null;
+}
+
 async function fetchKlines(secid, { fqt = 2, retries = 3, backoffMs = 45_000 } = {}) {
   const url = `${API}?secid=${encodeURIComponent(secid)}&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=${fqt}&beg=19700101&end=20991231`;
   for (let i = 0; i <= retries; i++) {
-    const j = curlJson(url);
+    // 同一轮次内 curl 失败立即换浏览器通道, 不先耗尽退避(WAF 生效期 curl 必失败,
+    // 先退避再回退会让每个请求白等数分钟)
+    let j = curlJson(url);
+    let via = 'curl';
+    if (j === null) {
+      j = await browserJson(url);
+      via = 'browser';
+    }
     const k = j?.data?.klines;
-    if (Array.isArray(k) && k.length) return j.data;
-    console.log(`    重试 ${i + 1}/${retries} (${j ? '无数据' : '请求失败'})...`);
+    if (Array.isArray(k) && k.length) {
+      if (via === 'browser') console.log('    (curl 被 WAF 拦截, 走浏览器通道)');
+      return j.data;
+    }
+    console.log(`    重试 ${i + 1}/${retries} (curl+浏览器均失败)...`);
     if (i < retries) await sleep(backoffMs * (i + 1));
   }
   return null;
@@ -308,5 +359,6 @@ if (ticker.length) {
 }
 
 await writeFile(path.join(outDir, 'index.json'), JSON.stringify(manifest, null, 2));
+await closeBrowser();
 console.log(`\n完成: ${targets.length + (wantBtc ? 1 : 0) - failures}/${targets.length + (wantBtc ? 1 : 0)}${failures ? `, 失败: ${failures}` : ''}`);
 process.exitCode = failures ? 1 : 0;

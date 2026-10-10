@@ -6,6 +6,7 @@ import { computeStats, dcaSeries, type ReplayInput, type ReplayStats } from '@/l
 import { dateISO, fmtPrice, moneyEn, moneyZh, multiple, pct } from '@/lib/format';
 import type { Locale } from '@/lib/i18n';
 import { GAIN, LOSS } from '@/lib/tokens';
+import { SITE_HOST } from '@/lib/site';
 import type { StockMeta } from '@/lib/stocks';
 
 const SANS = '"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
@@ -239,7 +240,7 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
   ctx.textAlign = 'right';
   ctx.font = `600 34px ${MONO}`;
   ctx.fillStyle = 'rgba(17,17,20,0.55)';
-  ctx.fillText('whatif.axtrivc.com', W - P, H - 108);
+  ctx.fillText(SITE_HOST, W - P, H - 108);
 
   return new Promise((resolve, reject) => {
     cv.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png', 0.95);

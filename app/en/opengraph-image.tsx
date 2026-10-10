@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ImageResponse } from 'next/og';
 import { multiple } from '@/lib/format';
+import { SITE_HOST } from '@/lib/site';
 
 export const dynamic = 'force-static';
 export const size = { width: 1200, height: 630 };
@@ -128,7 +129,7 @@ export default function OgImage() {
             opacity: 0.5,
           }}
         >
-          whatif.axtrivc.com
+          {SITE_HOST}
         </div>
       </div>
     ),

@@ -1,4 +1,5 @@
 import HomeContent from '@/components/HomeContent';
+import { SITE_URL } from '@/lib/site';
 import type { Metadata } from 'next';
 
 export const revalidate = false;
@@ -15,7 +16,7 @@ const JSONLD = JSON.stringify({
   '@type': 'WebSite',
   name: '假如当时买了 · WhatIf',
   alternateName: 'WhatIf',
-  url: 'https://whatif.axtrivc.com/',
+  url: `${SITE_URL}/`,
   inLanguage: 'zh-CN',
   description:
     '选一只股票、一个年份、一笔本金，用动画逐日回放长期持有的复利之旅。历史数据模拟，仅供参考。',

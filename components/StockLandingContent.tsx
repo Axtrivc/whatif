@@ -4,6 +4,7 @@ import { computeStats } from '@/lib/engine';
 import { moneyEn, moneyZh, multiple, pct } from '@/lib/format';
 import { dict, lp, MARKET_LABEL_I18N, type Locale } from '@/lib/i18n';
 import { loadSeries, startIndexForYear, STOCKS, STOCK_MAP, type Series, type StockMeta } from '@/lib/stocks';
+import { SITE_URL } from '@/lib/site';
 import { ccyPrefix } from '@/lib/tokens';
 
 interface Props {
@@ -31,8 +32,8 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
       : `${prefix}100K`;
 
   // 面包屑结构化数据(中英各自指向对应语言 URL)
-  const homeUrl = `https://whatif.axtrivc.com${locale === 'en' ? '/en/' : '/'}`;
-  const pageUrl = `https://whatif.axtrivc.com${locale === 'en' ? `/en/p/${meta.key}/` : `/p/${meta.key}/`}`;
+  const homeUrl = `${SITE_URL}${locale === 'en' ? '/en/' : '/'}`;
+  const pageUrl = `${SITE_URL}${locale === 'en' ? `/en/p/${meta.key}/` : `/p/${meta.key}/`}`;
   const breadcrumbJsonLd = JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',

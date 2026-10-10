@@ -12,6 +12,7 @@ import type { ArrayBufferTarget as Mp4ArrayBufferTarget } from 'mp4-muxer';
 import { durationFor, type ReplayInput } from '@/lib/engine';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
 import type { Locale } from '@/lib/i18n';
+import { SITE_HOST } from '@/lib/site';
 
 const VW = 1280;
 const VH = 720;
@@ -111,7 +112,7 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
         ts: (f * 1000) / FPS,
         input,
         smooth,
-        watermark: 'whatif.axtrivc.com',
+        watermark: SITE_HOST,
         locale,
         ccy,
         compareSeries,

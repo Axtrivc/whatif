@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { MetadataRoute } from 'next';
 import { STOCKS } from '@/lib/stocks';
+import { SITE_URL } from '@/lib/site';
 
 export const dynamic = 'force-static';
 
@@ -29,7 +30,7 @@ const ymdToDate = (ymd: string): Date => {
 };
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const base = 'https://whatif.axtrivc.com';
+  const base = SITE_URL;
   const manifest = dataManifest();
   const entryDates: Date[] = STOCKS.map((s) => {
     const last = manifest[s.key]?.last;

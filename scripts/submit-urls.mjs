@@ -23,7 +23,7 @@ const ENDPOINTS = ['https://api.indexnow.org/indexnow', 'https://www.bing.com/in
 function stockKeys() {
   const src = readFileSync(join(ROOT, 'lib', 'stocks.ts'), 'utf8');
   const out = [];
-  const re = /key:\s*'([a-z]+)'/g;
+  const re = /key:\s*'([a-z0-9-]+)'/g;
   let m;
   while ((m = re.exec(src)) !== null) out.push(m[1]);
   return [...new Set(out)];
@@ -34,6 +34,8 @@ async function submit(urls, endpoint) {
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    // 端点挂起时 20s 快速失败换备用节点, 不等 undici 默认 300s headersTimeout
+    signal: AbortSignal.timeout(20_000),
     body: JSON.stringify({
       host,
       key: KEY,
@@ -41,6 +43,8 @@ async function submit(urls, endpoint) {
       urlList: urls,
     }),
   });
+  // 响应体不消费会拖住连接: 只需要状态码, 显式取消
+  try { await res.body?.cancel(); } catch {}
   // 200/202 = 已加入抓取队列; 403 = 密钥文件校验失败
   return res.status;
 }

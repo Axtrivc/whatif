@@ -35,7 +35,7 @@ npm run fetch-data   # 抓取/更新股票数据（东财限流, 脚本内置 5s
 npm run dev
 npm run test        # 引擎单元测试（node --test，零依赖）
 npm run lint        # TypeScript 类型检查
-npm run build       # 静态导出到 out/（prebuild 先跑数据完整性校验）
+npm run build       # 静态导出到 out/（prebuild 先跑数据完整性校验; 构建后自动把英文站产物 lang 改为 en）
 ```
 
 > OG 分享图：中文版为 tools/og-src.html 模板 → 浏览器以 1200×630 截图存 public/og.png；
@@ -62,6 +62,7 @@ node scripts/fetch-data.mjs msft btc # 指定标的
 任意静态托管（Cloudflare Pages / Vercel / OSS+CDN）：
 
 1. `npm run build` → 部署 `out/`
+   - 注意: 托管侧构建命令必须是 `npm run build`（而非裸 `next build`），否则 prebuild 数据门禁与英文站 lang 修正不会执行（Cloudflare Pages 默认构建命令绕过 npm 钩子, 需在控制台手动指定）
 2. DNS 增加 CNAME：`whatif.axtrivc.com` → 托管地址
 3. 新 URL 可提交 IndexNow：`node scripts/submit-urls.mjs`（密钥文件 `public/<key>.txt`，换密钥时与脚本内常量同步更新）
 
