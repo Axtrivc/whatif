@@ -9,14 +9,18 @@
     if (!k) return;
     var W = (window.__wiData = window.__wiData || {});
     if (W[k]) return;
-    W[k] = fetch('/data/' + k + '.json').then(
-      function (r) {
-        return r.ok ? r.json() : null;
-      },
-      function () {
+    W[k] = fetch('/data/' + k + '.json')
+      .then(
+        function (r) {
+          return r.ok ? r.json() : null;
+        },
+        function () {
+          return null;
+        }
+      )
+      .catch(function () {
         return null;
-      }
-    );
+      });
   } catch (e) {
     /* 早取失败无妨, ReplayClient 会走常规 fetch */
   }

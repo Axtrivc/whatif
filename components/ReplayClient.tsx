@@ -38,22 +38,29 @@ export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
     setSeries(null);
     setError(null);
     // 首次加载与 HTML 早取脚本(wi-early.js)共享同一 promise(谁先执行谁创建),
-    // 客户端导航/直开两种进入方式都只发一次请求; 失败 resolve null → 错误态
+    // 客户端导航/直开两种进入方式都只发一次请求; 失败(含 JSON 解析失败) resolve null → 错误态
     const earlyMap = ((window as { __wiData?: Record<string, Promise<Series | null>> }).__wiData ??=
       {});
     if (attempt === 0) {
-      earlyMap[key] ??= fetch(`/data/${key}.json`).then(
-        (r) => (r.ok ? r.json() : null),
-        () => null
-      ) as Promise<Series | null>;
+      earlyMap[key] ??= fetch(`/data/${key}.json`)
+        .then(
+          (r) => (r.ok ? r.json() : null),
+          () => null
+        )
+        .catch(() => null) as Promise<Series | null>;
       const timer = window.setTimeout(() => {
         if (alive) setError('load');
       }, 15_000);
       earlyMap[key].then((data) => {
         window.clearTimeout(timer);
         if (!alive) return;
-        if (data) setSeries(data);
-        else setError('load');
+        if (data) {
+          setSeries(data);
+          setError(null); // 慢网竞态: 15s timer 可能已置错, 数据迟到时清掉, 否则渲染门永卡失败态
+        } else {
+          delete earlyMap[key]; // 失败清缓存: 下次挂载 attempt===0 重新发起而非命中脏 promise
+          setError('load');
+        }
       });
       return () => {
         alive = false;
@@ -70,7 +77,10 @@ export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
         return r.json();
       })
       .then((data: Series) => {
-        if (alive) setSeries(data);
+        if (alive) {
+          setSeries(data);
+          earlyMap[key] = Promise.resolve(data); // 重试成功回写早取缓存, 后续导航直接命中
+        }
       })
       .catch(() => {
         // 失败(HTTP/网络/15s 超时)都转入可重试错误态; 组件已卸载时由 alive 拦截
@@ -101,6 +111,7 @@ export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
           )}
           <Link
             href={homeHref}
+            prefetch={false}
             className="rounded-md border border-ink-950/15 bg-white px-5 py-2 text-sm text-ink-950/70 transition hover:border-ink-950/40 hover:text-ink-950"
           >
             {t.backHome}

@@ -101,17 +101,29 @@ async function fetchKlines(secid, { fqt = 2, retries = 3, backoffMs = 45_000 } =
 }
 
 /** Bitstamp 日K 前向分页抓取(不带 end: start+limit 稳定返回自 start 起的下一页;
- *  带远端 end 时窗口语义不稳定, 时而返回末尾 1000 根) */
+ *  带远端 end 时窗口语义不稳定, 时而返回末尾 1000 根)。
+ *  返回 { rows, complete }: complete 仅在分页到达最新(now-2d 容忍窗)时为 true;
+ *  请求失败(重试后)、数据洞、窗口未推进、页数耗尽均为 false, 调用方不得写盘 */
 async function fetchBtcDaily() {
   const DAY = 86_400;
   const now = Math.floor(Date.now() / 1000);
   const rows = new Map();
   let from = 1_313_616_000; // 2011-08-18, Bitstamp 交易起点
+  let complete = false;
   for (let page = 0; page < 12; page++) {
     const url = `https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=1000&start=${from}`;
-    const j = curlJson(url, { ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' });
+    // 单页最多 4 次尝试; curlJson 返回 null = 请求失败(可重试), 合法响应但 ohlc 空 = 数据洞(不重试)
+    let j = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      j = curlJson(url, { ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' });
+      if (j !== null) break;
+      if (attempt < 3) {
+        console.log(`    第 ${page + 1} 页请求失败, 重试 ${attempt + 1}/4...`);
+        await sleep(GAP_MS);
+      }
+    }
     const ohlc = j?.data?.ohlc;
-    if (!Array.isArray(ohlc) || !ohlc.length) break;
+    if (j === null || !Array.isArray(ohlc) || !ohlc.length) break; // 请求失败(重试后)或数据洞 → 不完整
     let lastTs = 0;
     for (const r of ohlc) {
       const t = Number(r.timestamp);
@@ -123,16 +135,29 @@ async function fetchBtcDaily() {
     }
     console.log(`    第 ${page + 1} 页: 累计 ${rows.size} 根`);
     if (lastTs < from) break; // 窗口未推进(重复响应), 防死循环
-    if (lastTs >= now - 2 * DAY) break; // 已到最新(当日K未收, 容忍2天)
+    if (lastTs >= now - 2 * DAY) {
+      complete = true; // 已到最新(当日K未收, 容忍2天)
+      break;
+    }
     from = lastTs + DAY;
     await sleep(GAP_MS);
   }
-  return rows;
+  return { rows, complete };
 }
 
 const wanted = process.argv.slice(2);
 const targets = wanted.length ? CATALOG.filter(([k]) => wanted.includes(k)) : CATALOG;
 const wantBtc = !wanted.length || wanted.includes(BTC[0]);
+
+// 防呆: 拼错的 key 会让 targets 为空并静默重写 ticker.json/index.json 后以"完成: 0/0"收尾。
+// 属误操作应立即退出且不触发任何文件写入 — 故置于全部 mkdir/读写之前。
+const known = new Set([...CATALOG.map(([k]) => k), BTC[0]]);
+const unknown = wanted.filter((k) => !known.has(k));
+if (unknown.length) {
+  console.error(`✘ 未知标的 key: ${unknown.join(', ')}`);
+  console.error(`  可用: ${[...known].join(', ')}`);
+  process.exit(1);
+}
 
 const outDir = path.resolve(import.meta.dirname, '../public/data');
 await mkdir(outDir, { recursive: true });
@@ -184,16 +209,20 @@ for (const [key, secids, minPoints, ,] of targets) {
     // 补抓 fqt=0 不复权真实价(展示"买入价/现价"), 按日期对齐合并
     const raw = await fetchKlines(secid, { fqt: 0 });
     await sleep(GAP_MS);
-    if (raw) {
-      const map = new Map();
-      for (const row of raw.klines) {
-        const [d, c] = row.split(',');
-        map.set(d.replace(/-/g, ''), Number(c));
-      }
-      // 与后复权序列按日期对齐; 完全一致(无分红/未除权)时省略该字段, 数据文件体积约减半; 展示端回退 closes
-      const aligned = dates.map((d) => map.get(d) ?? null);
-      if (aligned.some((v, i) => v !== closes[i])) payload.rawCloses = aligned;
+    // 失败即换下一个 secid, 不写盘: 缺 rawCloses 时展示端回退后复权 closes 充当真实价,
+    // 分红标的差百倍(如 MSFT 后复权 153365 vs 真实 496), 静默落盘属数据事故
+    if (!raw) {
+      console.error(`  ✘ ${key} 不复权价(fqt=0)抓取失败 — 缺 rawCloses 会把后复权价当真实价展示, 换下一个 secid`);
+      continue;
     }
+    const map = new Map();
+    for (const row of raw.klines) {
+      const [d, c] = row.split(',');
+      map.set(d.replace(/-/g, ''), Number(c));
+    }
+    // 与后复权序列按日期对齐; 完全一致(无分红/未除权)时省略该字段, 数据文件体积约减半; 展示端回退 closes
+    const aligned = dates.map((d) => map.get(d) ?? null);
+    if (aligned.some((v, i) => v !== closes[i])) payload.rawCloses = aligned;
     await writeFile(path.join(outDir, `${key}.json`), JSON.stringify(payload));
     manifest[key] = { first: payload.first, last: payload.last, points: payload.points };
     console.log(`  ✔ ${data.name} ${dates[0]} → ${dates[dates.length - 1]}  ${dates.length} 点`);
@@ -209,8 +238,16 @@ for (const [key, secids, minPoints, ,] of targets) {
 if (wantBtc) {
   const [key, , zh] = BTC;
   console.log(`→ ${key} (Bitstamp)`);
-  const rows = await fetchBtcDaily();
-  if (rows.size >= 5000) {
+  const { rows, complete } = await fetchBtcDaily();
+  // 动态下限: 自 Bitstamp 起点起 90% 天数, 随历史自然收紧(今天≈4978, 与原 5000 平滑衔接)
+  const minRows = Math.floor(((Date.now() / 1000 - 1_313_616_000) / 86_400) * 0.9);
+  if (!complete) {
+    failures++;
+    console.error('  ✘✘ btc 分页未到达最新，放弃更新');
+  } else if (rows.size < minRows) {
+    failures++;
+    console.error(`  ✘✘ btc 仅 ${rows.size} 根(< ${minRows}), 放弃更新`);
+  } else {
     const keys = [...rows.keys()].sort((a, b) => a - b);
     const ymd = (ts) => new Date(ts * 1000).toISOString().slice(0, 10).replace(/-/g, '');
     const dates = keys.map(ymd);
@@ -230,9 +267,6 @@ if (wantBtc) {
     await writeFile(path.join(outDir, `${key}.json`), JSON.stringify(payload));
     manifest[key] = { first: payload.first, last: payload.last, points: payload.points };
     console.log(`  ✔ BTC/USD ${dates[0]} → ${dates[dates.length - 1]}  ${dates.length} 点`);
-  } else {
-    failures++;
-    console.error(`  ✘✘ btc 仅 ${rows.size} 根(Bitstamp), 放弃更新`);
   }
 }
 

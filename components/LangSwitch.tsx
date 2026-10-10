@@ -23,9 +23,12 @@ export default function LangSwitch({ locale }: { locale: Locale }) {
   return (
     <Link
       href={`${href}${search}`}
+      prefetch={false}
       lang={target === 'en' ? 'en' : 'zh-CN'}
       aria-label={target === 'en' ? 'Switch to English' : '切换到中文'}
-      className="rounded-md border border-ink-950/10 bg-white px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-wider text-ink-950/60 transition hover:border-ink-950/30 hover:text-ink-950"
+      className={`rounded-md border border-ink-950/10 bg-white py-1.5 font-mono text-[11px] font-bold uppercase tracking-wider text-ink-950/60 transition hover:border-ink-950/30 hover:text-ink-950 ${
+        locale === 'en' ? 'px-2 sm:px-3' : 'px-3'
+      }`}
     >
       {target === 'en' ? 'EN' : '中'}
     </Link>

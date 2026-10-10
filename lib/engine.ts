@@ -26,7 +26,6 @@ export interface ReplayStats {
   maxDrawdown: number; // 0~1
   startDate: string;
   endDate: string;
-  bestDay: { idx: number; value: number };
   invested?: number; // dca 模式: 累计投入本金
 }
 
@@ -97,20 +96,10 @@ export function investedSeries(input: ReplayInput): Float64Array {
   return out;
 }
 
-/** dca 模式累计投入(截至 end): 首笔 amount + 后续每月 monthly */
+/** dca 模式累计投入(截至 end): 首笔 amount + 后续每月 monthly。
+ *  委托 investedSeries(共享其 WeakMap 缓存与逐月注入规则, lump-sum 恒为 amount)。 */
 export function dcaInvested(input: ReplayInput): number {
-  if (!input.monthly) return input.amount;
-  const { dates, start, end } = input;
-  let months = 0;
-  let lastM = -1;
-  for (let i = start; i <= end; i++) {
-    const m = monthSeq(dates[i]);
-    if (lastM < m) {
-      lastM = m;
-      months++;
-    }
-  }
-  return input.amount + input.monthly * (months - 1);
+  return investedSeries(input)[input.end - input.start];
 }
 
 /** 全程统计(回放结束时展示) */
@@ -118,16 +107,15 @@ export function computeStats(input: ReplayInput): ReplayStats {
   const { dates, start, end } = input;
   const series = dcaSeries(input);
   // 累计投入复用 investedSeries 缓存(渲染层已建), 不再单独扫一遍日期序列
-  const invested = input.monthly ? investedSeries(input)[end - start] : input.amount;
+  const inv = investedSeries(input);
+  // 总量口径(profit/returnPct/multiple/cagr): 期末累计投入; lump-sum 为常量 amount
+  const invested = inv[end - start];
+  // 回撤口径: 逐日以"当日累计投入"为分母 — 用期末投入作全程分母会系统性低估定投回撤
   let peak = -Infinity;
-  let peakIdx = start;
   let maxDD = 0;
   for (let j = 0; j <= end - start; j++) {
-    const v = series[j] / invested;
-    if (v > peak) {
-      peak = v;
-      peakIdx = start + j;
-    }
+    const v = series[j] / inv[j];
+    if (v > peak) peak = v;
     const dd = (peak - v) / peak;
     if (dd > maxDD) maxDD = dd;
   }
@@ -148,7 +136,6 @@ export function computeStats(input: ReplayInput): ReplayStats {
     maxDrawdown: maxDD,
     startDate: dates[start],
     endDate: dates[end],
-    bestDay: { idx: peakIdx, value: peak * invested },
     invested: input.monthly ? invested : undefined,
   };
 }

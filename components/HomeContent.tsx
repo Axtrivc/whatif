@@ -35,7 +35,7 @@ interface PresetCard {
   monthly?: number;
   multText: string;
   up: boolean; // 盈亏语义(倍数≥1), 直接取自引擎而非解析展示文本
-  finalEn: string;
+  final: string; // 说明行终值: zh 万/亿(币种中性无符号) / en 币种缩写 — 与同行「首笔/每月」格式口径一致
   years: number;
 }
 
@@ -91,7 +91,7 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
         monthly: v.monthly,
         multText: multiple(stats.multiple),
         up: stats.multiple >= 1,
-        finalEn: moneyEn(stats.finalValue, meta.ccy),
+        final: locale === 'zh' ? moneyZh(stats.finalValue) : moneyEn(stats.finalValue, meta.ccy),
         years: Math.round(stats.years),
       });
     }
@@ -155,6 +155,7 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
                 href={`${lp(locale, '/replay')}?s=${p.key}&y=${p.year}&a=${p.amount}${
                   p.monthly ? `&m=dca&monthly=${p.monthly}` : ''
                 }`}
+                prefetch={false}
                 className="group relative overflow-hidden rounded-lg border border-ink-950/10 bg-white p-4 transition duration-200 hover:border-ink-950/35 hover:shadow-[0_10px_28px_-18px_rgba(17,17,20,0.45)]"
               >
                 {/* 左缘模式色条: 暖红=一次性买入, 青绿=定投 */}
@@ -189,11 +190,11 @@ export default async function HomeContent({ locale }: { locale: Locale }) {
               <div className="mt-0.5 line-clamp-3 text-[11px] leading-4 text-ink-950/45">
                 {locale === 'zh'
                   ? p.monthly
-                    ? `首笔 ${moneyZh(p.amount)} + 每月 ${moneyZh(p.monthly)} → ${p.years} 年 · ${p.finalEn}`
-                    : `本金 ${moneyZh(p.amount)} → ${p.years} 年后`
+                    ? <>{`首笔 ${moneyZh(p.amount)} + 每月 ${moneyZh(p.monthly)} → `}<span className="whitespace-nowrap">{`${p.years} 年`}</span>{` · ${p.final}`}</>
+                    : <>{`本金 ${moneyZh(p.amount)} → `}<span className="whitespace-nowrap">{`${p.years} 年后`}</span></>
                   : p.monthly
-                    ? `${t.presetPrincipal} ${moneyEn(p.amount)} + ${moneyEn(p.monthly!)}/mo → ${p.years} ${t.yearsLater(0)} · ${p.finalEn}`
-                    : `${t.presetPrincipal} ${moneyEn(p.amount)} → ${p.years} ${t.yearsLater(0)} · ${p.finalEn}`}
+                    ? <>{`${t.presetPrincipal} ${moneyEn(p.amount)} + ${moneyEn(p.monthly!)}/mo → `}<span className="whitespace-nowrap">{`${p.years} ${t.yearsLater(0)}`}</span>{` · ${p.final}`}</>
+                    : <>{`${t.presetPrincipal} ${moneyEn(p.amount)} → `}<span className="whitespace-nowrap">{`${p.years} ${t.yearsLater(0)}`}</span>{` · ${p.final}`}</>}
               </div>
               </Link>
             );

@@ -7,6 +7,7 @@
     "dev": "next dev",
     "prebuild": "node scripts/check-data.mjs",
     "build": "next build",
+    "postbuild": "node scripts/fix-en-lang.mjs",
     "start": "next start",
     "lint": "tsc --noEmit",
     "test": "node --test",

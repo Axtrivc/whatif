@@ -3,7 +3,7 @@ import SiteHeader from '@/components/SiteHeader';
 import { computeStats } from '@/lib/engine';
 import { moneyEn, moneyZh, multiple, pct } from '@/lib/format';
 import { dict, lp, MARKET_LABEL_I18N, type Locale } from '@/lib/i18n';
-import { loadSeries, STOCKS, STOCK_MAP, type Series, type StockMeta } from '@/lib/stocks';
+import { loadSeries, startIndexForYear, STOCKS, STOCK_MAP, type Series, type StockMeta } from '@/lib/stocks';
 import { ccyPrefix } from '@/lib/tokens';
 
 interface Props {
@@ -73,6 +73,11 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
   const replayHref = (y: number) => `${lp(locale, '/replay')}?s=${meta.key}&y=${y}&a=100000`;
   const others = STOCKS.filter((s) => s.key !== meta.key && s.hot).slice(0, 5);
 
+  // 涨跌语义色按语言取向: 中文红涨绿跌(市场惯例, 默认不变); 英文绿涨红跌(英文读者直觉)。
+  // 只复用现有红/青绿色板, 不新增颜色
+  const upTone = locale === 'en' ? 'text-loss' : 'text-profit';
+  const downTone = locale === 'en' ? 'text-gain' : 'text-loss';
+
   return (
     <main className="mx-auto w-full max-w-3xl px-5 pb-16">
       <script
@@ -81,7 +86,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
       />
       <SiteHeader locale={locale} ctaHref={replayHref(firstYear)} ctaLabel={t.watchAnimation} />
 
-      <h1 className="mt-6 text-3xl font-black leading-snug sm:text-4xl">
+      <h1 className="mt-6 text-3xl font-black leading-snug text-balance sm:text-4xl">
         {t.landingTitle(String(firstYear), name, meta.symbol)}
       </h1>
 
@@ -153,7 +158,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
                 </td>
                 <td
                   className={`px-3 py-3 text-right sm:px-4 font-mono font-bold ${
-                    r.stats.returnPct >= 0 ? 'text-profit' : 'text-loss'
+                    r.stats.returnPct >= 0 ? upTone : downTone
                   }`}
                 >
                   {multiple(r.stats.multiple)}
@@ -169,27 +174,29 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
 
       <p className="mt-6 text-xs leading-6 text-ink-950/50">{t.caliberNote}</p>
 
-      {/* 定投 vs 一次性买入对比(真实数据构建期计算): 总投入 10 万的两种买法 */}
+      {/* 定投 vs 一次性买入对比(真实数据构建期计算): lump-sum 期初一笔投 10 万; DCA 首笔 1 万 + 每月 2000 持续到数据末尾, 两行总投入不同, 收益率列各按自身投入归一 */}
       <section className="mt-12">
         <h2 className="text-sm font-bold uppercase tracking-widest text-ink-950/40">
           {t.dcaCompare}
         </h2>
         <p className="mt-1 text-xs text-ink-950/50">{t.dcaCompareIntro}</p>
         {(() => {
-          // 口径: 总投入都是 10 万。lump-sum = 期初一次买; DCA = 首笔 1 万 + 每月 2000
+          // 口径: lump-sum 期初一次投 10 万; DCA = 首笔 1 万 + 每月 2000 至数据末尾(累计投入以 dcaStats.invested 为准, 两栏各自如实展示)
           const TOTAL = 100_000;
           const monthlyAmt = 2_000;
+          // firstYear 即 series.first 的年份, dates[0] 属于该年, 与 findIndex 恒等返回 0
+          const start = startIndexForYear(series, firstYear);
           const lumpStats = computeStats({
             dates: series.dates,
             closes: series.closes,
-            start: series.dates.findIndex((d) => d.slice(0, 4) === String(firstYear)),
+            start,
             end: series.points - 1,
             amount: TOTAL,
           });
           const dcaStats = computeStats({
             dates: series.dates,
             closes: series.closes,
-            start: series.dates.findIndex((d) => d.slice(0, 4) === String(firstYear)),
+            start,
             end: series.points - 1,
             amount: 10_000,
             monthly: monthlyAmt,
@@ -228,7 +235,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
                         </td>
                         <td
                           className={`px-3 py-3 text-right sm:px-4 font-mono font-bold ${
-                            r.s.returnPct >= 0 ? 'text-profit' : 'text-loss'
+                            r.s.returnPct >= 0 ? upTone : downTone
                           }`}
                         >
                           {pct(r.s.returnPct, 0)}
@@ -241,15 +248,17 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
               <div className="mt-4 flex flex-wrap gap-2">
                 <Link
                   href={`${lp(locale, '/replay')}?s=${meta.key}&y=${firstYear}&a=10000&m=dca&monthly=${monthlyAmt}`}
+                  prefetch={false}
                   className="inline-flex rounded-md border border-dca/40 bg-white px-5 py-2 text-sm font-semibold text-dca transition hover:border-dca hover:bg-dca/[0.08] active:scale-95"
                 >
                   {t.dcaTryIt}
                 </Link>
                 <Link
                   href={`${lp(locale, '/replay')}?s=${meta.key}&y=${firstYear}&a=10000&m=dca&monthly=${monthlyAmt}&compare=1`}
+                  prefetch={false}
                   className="inline-flex rounded-md border border-gain/40 bg-white px-5 py-2 text-sm font-semibold text-gain transition hover:border-gain hover:bg-gain/[0.06] active:scale-95"
                 >
-                  {locale === 'zh' ? '▶ 同屏对比回放' : '▶ Side-by-side Replay'}
+                  {t.dcaCompareSideBySide}
                 </Link>
               </div>
             </>

@@ -35,7 +35,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     const last = manifest[s.key]?.last;
     return last ? ymdToDate(last) : new Date();
   });
-  const homeLast = entryDates.reduce((acc, d) => (d > acc ? d : new Date(0)), new Date(0));
+  const homeLast = entryDates.reduce((acc, d) => (d > acc ? d : acc), new Date(0));
   return [
     // 中文(默认)
     {

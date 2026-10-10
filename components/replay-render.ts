@@ -11,8 +11,10 @@
  *
  * 跨帧平滑状态(lo/hi/f)由调用方持有并经 smooth 传入 —— 渲染本身仍无副作用。
  */
-import { dcaSeries, indexAtT, investedSeries, type ReplayInput } from '@/lib/engine';
-import { dateYM, moneyEn, moneyZh } from '@/lib/format';
+// 相对路径 + 显式 .ts 后缀: node --test 直跑类型剥离 TS 时无法解析 '@/' 别名,
+// 也无法解析无后缀说明符(同 lib/format.ts 的 './tokens.ts' 先例; tsc/Next 兼容)
+import { dcaSeries, indexAtT, investedSeries, type ReplayInput } from '../lib/engine.ts';
+import { dateYM, moneyEn, moneyZh } from '../lib/format.ts';
 
 export interface SmoothState {
   lo?: number; // 平滑后的 y 域下限(资产值)
@@ -39,7 +41,7 @@ export interface ChartOpts {
 }
 
 const MONO = 'ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace';
-import { GAIN, LOSS, hexToRgb } from '@/lib/tokens';
+import { GAIN, LOSS, hexToRgb } from '../lib/tokens.ts';
 const RED = hexToRgb(GAIN);
 const CYAN = hexToRgb(LOSS);
 
@@ -115,6 +117,88 @@ function mixColor(f: number, alpha = 1): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+/**
+ * ── 前沿插值: 在相邻两日间逐帧线性滑动 ──
+ * n=0(单点序列, start==end)时 j=j1=0, 恒返回 val[0] —— j1 的钳制口径与
+ * renderFrame 内对比曲线插值(cmpVal)一致, 不再越界读 val[1] 产生 NaN。
+ */
+export function fwdVal(val: Float64Array, n: number, x: number, start: number): number {
+  const j = Math.max(0, Math.min(n - 1, Math.floor(x) - start));
+  const f = Math.min(Math.max(x - start - j, 0), 1);
+  const j1 = Math.min(j + 1, n);
+  return val[j] + (val[j1] - val[j]) * f;
+}
+
+/**
+ * 列收束: [first, iMin, iMax, last] 恒有 first ≤ iMin,iMax ≤ last(极值只在列内
+ * 追踪), 按升序去重落盘 —— 只 push 严格大于已输出末尾的下标, 保证全局严格递增。
+ */
+function flushColumn(out: number[], first: number, iMin: number, iMax: number, last: number): void {
+  if (out.length === 0 || first > out[out.length - 1]) out.push(first);
+  const lo = iMin < iMax ? iMin : iMax;
+  const hi = iMin < iMax ? iMax : iMin;
+  if (lo > out[out.length - 1]) out.push(lo);
+  if (hi > out[out.length - 1]) out.push(hi);
+  if (last > out[out.length - 1]) out.push(last);
+}
+
+/**
+ * ── 逐像素列折叠(列内保留极值, 仓库先例: ShareCard 全程曲线 step 抽稀) ──
+ * x 随 j 单调时按像素列 column=Math.floor(x) 分组: 每列除首末下标外, 再以 yAt
+ * 跟踪列内 y 最小/最大下标, 进入新列或收尾时按 [first, iMin, iMax, last] 升序
+ * 去重输出(保留原始精确坐标, 不做插值) —— 列中部的深谷/尖峰不再被首末弦线
+ * 削平(全程最低点落在列中部时, 旧实现的最大偏离可达全量程百分之几)。
+ * j=0 与 j=k 恒保留, 输出升序严格递增; 点距 ≥1px(互不同列)时与 0..k 恒等
+ * (无操作); 每列至多 4 点, 段数上限 ≤ 4·plotW。扫描 O(k) 廉价算术(逐点一次
+ * yAt); 传入 out 复用缓冲可避免每帧大数组分配。
+ */
+export function collapseIndices(
+  k: number,
+  xAt: (j: number) => number,
+  yAt: (j: number) => number,
+  out: number[] = [],
+): number[] {
+  out.length = 0;
+  if (k < 0) return out;
+  let col = Math.floor(xAt(0));
+  let first = 0;
+  let iMin = 0;
+  let iMax = 0;
+  let last = 0;
+  let yMin = yAt(0);
+  let yMax = yAt(0);
+  for (let j = 1; j <= k; j++) {
+    const c = Math.floor(xAt(j));
+    const y = yAt(j);
+    if (c === col) {
+      last = j;
+      if (y < yMin) {
+        yMin = y;
+        iMin = j;
+      }
+      if (y > yMax) {
+        yMax = y;
+        iMax = j;
+      }
+    } else {
+      // 进入新列: 先把旧列收束为 [first, iMin, iMax, last], 再开新列首点 j
+      flushColumn(out, first, iMin, iMax, last);
+      col = c;
+      first = j;
+      iMin = j;
+      iMax = j;
+      last = j;
+      yMin = y;
+      yMax = y;
+    }
+  }
+  flushColumn(out, first, iMin, iMax, last); // 末列收尾(j=k 恒在列内)
+  return out;
+}
+
+/** 折叠下标帧间复用缓冲(renderFrame 单线程同步使用, 不跨帧持有) */
+const collapseBuf: number[] = [];
+
 export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const { w, h, dpr, t, ts, input, smooth } = o;
   const money = o.locale === 'en' ? (v: number) => moneyEn(v, o.ccy) : moneyZh;
@@ -130,11 +214,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
 
   // ── 小数进度: 前沿在相邻两日间逐帧插值滑动, 消除按日瞬移 ──
   const headPos = Math.min(input.start + t * (n + 1), input.end);
-  const valF = (x: number) => {
-    const j = Math.max(0, Math.min(n - 1, Math.floor(x) - input.start));
-    const f = Math.min(Math.max(x - input.start - j, 0), 1);
-    return p.val[j] + (p.val[j + 1] - p.val[j]) * f;
-  };
+  const valF = (x: number) => fwdVal(p.val, n, x, input.start);
   const value = valF(headPos);
 
   // ── 时间轴映射: x 按真实日历时间均匀展开, 与参考视频一致 ──
@@ -310,45 +390,60 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   // ── 折线 + 渐变面积(裁剪进绘图区); 从起点到前沿逐帧生长 ──
   const headX = curTs > startTs ? plotR : plotL;
   const headY = yOf(value);
-  const drawPath = () => {
-    ctx.beginPath();
-    ctx.moveTo(plotL, yOf(p.val[0]));
-    for (let j = 1; j <= k; j++) ctx.lineTo(xOf(j), yOf(p.val[j]));
-    ctx.lineTo(headX, headY);
+  // 已播放全长折线逐像素列折叠: 段数 ≤ 4·plotW, 帧成本与播放进度 k 解耦;
+  // 每列保留首末点 + 列内 y 极值点(坐标原样), 列中部深谷/尖峰不被弦线削平,
+  // 折线包络与前缀最值 y 域一致; 描边/面积/对比曲线共用同一份 keep 下标,
+  // 包络只增不减(先例: ShareCard 全程曲线抽稀)。k ≤ plotW 的短序列点距平均
+  // 不足 1 列, 折叠无收益还可能引入局部偏差 → 走原直循环, 输出逐点一致。
+  const keep = k > plotW ? collapseIndices(k, xOf, (j) => p.val[j], collapseBuf) : null;
+  // 沿保留下标把序列写入 Path2D(首点 moveTo, 其余 lineTo); x 单调保证升序
+  const seriesPath = (path: Path2D, yOfJ: (j: number) => number) => {
+    if (keep) {
+      path.moveTo(xOf(keep[0]), yOfJ(keep[0]));
+      for (let i = 1; i < keep.length; i++) path.lineTo(xOf(keep[i]), yOfJ(keep[i]));
+    } else {
+      path.moveTo(plotL, yOfJ(0));
+      for (let j = 1; j <= k; j++) path.lineTo(xOf(j), yOfJ(j));
+    }
   };
   ctx.save();
   ctx.beginPath();
   ctx.rect(plotL, plotT - 4, plotW, plotH + 8);
   ctx.clip();
-  // ── 对比曲线(垫底层): 灰白虚线, 一次性买入参照 ──
+  // ── 对比曲线(垫底层): 灰白虚线, 一次性买入参照(同一份折叠下标) ──
   if (cmp) {
-    ctx.beginPath();
-    ctx.moveTo(plotL, yOf(cmp[0]));
-    for (let j = 1; j <= k; j++) ctx.lineTo(xOf(j), yOf(cmp[j]));
-    if (cmpVal != null) ctx.lineTo(headX, yOf(cmpVal));
+    const cmpPath = new Path2D();
+    seriesPath(cmpPath, (j) => yOf(cmp[j]));
+    if (cmpVal != null) cmpPath.lineTo(headX, yOf(cmpVal));
     ctx.setLineDash([6, 5]);
     ctx.strokeStyle = 'rgba(17,17,20,0.38)';
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
-    ctx.stroke();
+    ctx.stroke(cmpPath);
     ctx.setLineDash([]);
   }
   const area = ctx.createLinearGradient(0, plotT, 0, plotB);
   area.addColorStop(0, mixColor(f, 0.18));
   area.addColorStop(1, 'rgba(255,255,255,0)');
-  drawPath();
-  ctx.lineTo(headX, plotB);
-  ctx.lineTo(plotL, plotB);
-  ctx.closePath();
+  // 面积: 同一份保留下标 + 前沿点 + 底边两角, 单独 Path2D 一次 fill
+  // (描边/面积/对比线共享同一份折叠, 消除原来的三次全长逐点重建)
+  const areaPath = new Path2D();
+  seriesPath(areaPath, (j) => yOf(p.val[j]));
+  areaPath.lineTo(headX, headY);
+  areaPath.lineTo(headX, plotB);
+  areaPath.lineTo(plotL, plotB);
+  areaPath.closePath();
   ctx.fillStyle = area;
-  ctx.fill();
+  ctx.fill(areaPath);
   // 精密单层描边(去霓虹光晕): 一根 crisp 主线
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  drawPath();
+  const linePath = new Path2D();
+  seriesPath(linePath, (j) => yOf(p.val[j]));
+  linePath.lineTo(headX, headY);
   ctx.strokeStyle = lineColor;
   ctx.lineWidth = 2.75;
-  ctx.stroke();
+  ctx.stroke(linePath);
   ctx.restore();
 
   // 前沿坐标(小数插值点)

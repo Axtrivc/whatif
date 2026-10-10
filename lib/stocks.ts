@@ -2,13 +2,16 @@
 
 export type Ccy = 'USD' | 'HKD' | 'CNY';
 
+/** 交易市场(单一来源: i18n 标签等处的 Record 键依赖此 union, 新增市场漏配会在编译期报错) */
+export type Market = 'nasdaq' | 'nyse' | 'index' | 'gold' | 'crypto' | 'hk' | 'ashare';
+
 export interface StockMeta {
   key: string; // 数据文件名 / URL slug
   symbol: string; // 展示代码
   secid: string; // 东方财富代码
   zh: string; // 中文名
   en: string; // 英文名
-  market: 'nasdaq' | 'nyse' | 'index' | 'gold' | 'crypto' | 'hk' | 'ashare';
+  market: Market;
   ccy?: Ccy; // 真实价计价货币, 缺省 USD(引擎倍数为比值, 与币种无关)
   hot?: boolean; // 首页精选
   tagline: string; // 一句话
@@ -75,8 +78,14 @@ export async function loadSeries(key: string): Promise<Series | null> {
     const path = await import('node:path');
     const file = path.join(process.cwd(), 'public', 'data', `${key}.json`);
     out = JSON.parse(await fs.readFile(file, 'utf8')) as Series;
-  } catch {
-    out = null;
+  } catch (e) {
+    if ((e as { code?: string } | null)?.code === 'ENOENT') {
+      out = null; // 文件不存在: 稳定缺失, 维持缓存 null 语义
+    } else {
+      // 损坏/读取异常: 构建期必须可见, 且不写缓存以便下次调用重试
+      console.error(`✘ loadSeries(${key}): public/data/${key}.json 读取/解析失败 —`, e);
+      return null;
+    }
   }
   seriesCache.set(key, out);
   return out;

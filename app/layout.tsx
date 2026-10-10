@@ -39,7 +39,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" suppressHydrationWarning>
       <body className="wi-blueprint min-h-dvh bg-[#fafafa] text-ink-950 antialiased">
         <HtmlLang />
         {children}

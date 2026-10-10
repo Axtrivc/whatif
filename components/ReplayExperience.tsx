@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { computeStats, dcaInvested, dcaSeries, durationFor, indexAtT, investedSeries, type ReplayInput } from '@/lib/engine';
 import { dateYM, fmtPrice, money, pct, profit } from '@/lib/format';
-import { dict, type Locale } from '@/lib/i18n';
+import { dict, lp, type Locale } from '@/lib/i18n';
 import { rawClosesOf, startIndexForYear, type Series, type StockMeta } from '@/lib/stocks';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
 import { GAIN, LOSS } from '@/lib/tokens';
@@ -101,8 +101,24 @@ export default function ReplayExperience({
   const wasPlayingRef = useRef(false); // 拖动进度条前是否在播(松手自动恢复)
   const titleRef = useRef(0); // 标签页标题上次更新时刻(500ms 节流)
   const [videoPct, setVideoPct] = useState<number | null>(null); // null=空闲, 0-100=导出中
-  const videoSupported = useMemo(() => videoExportSupported(), []);
+  const [videoSupported, setVideoSupported] = useState(false); // 异步探测, 完成前不渲染入口
+  const [videoFail, setVideoFail] = useState(false); // 导出失败反馈(用户取消保持静默)
   const videoAbortRef = useRef<AbortController | null>(null); // 卸载时中止编码
+  const finaleRef = useRef<HTMLDivElement>(null); // 结算卡: 出现即承接焦点
+  const playBtnRef = useRef<HTMLButtonElement>(null); // Esc 关闭结算卡后焦点回到播放键
+  const prevDoneRef = useRef(done); // 上一渲染的 done: 焦点只在用户可见的 false→true 转场移入卡片
+
+  // 视频导出能力异步探测(isConfigSupported, 会话级缓存): 探测完成前按钮不出现,
+  // 避免不可编码环境(如 Firefox 部分版本)闪现必然失败的死入口
+  useEffect(() => {
+    let alive = true;
+    videoExportSupported().then((ok) => {
+      if (alive) setVideoSupported(ok);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const input = useMemo<ReplayInput>(() => {
     const start = startIndexForYear(series, year);
@@ -118,19 +134,18 @@ export default function ReplayExperience({
 
   const duration = useMemo(() => durationFor(input.end - input.start), [input]);
   const stats = useMemo(() => (done ? computeStats(input) : null), [done, input]);
-  // 对比曲线: 同参数一次性买入(总投入=定投累计投入), useMemo 稳定引用供 WeakMap 缓存
-  const compareSeries = useMemo(() => {
-    if (!compare || !monthly) return undefined;
-    const invested = dcaInvested(input);
-    return dcaSeries({ ...input, amount: invested, monthly: undefined });
-  }, [compare, monthly, input]);
-  // 对比口径的一次性买入终值(结算卡展示)
-  const lumpFinal = useMemo(() => {
+  // 对比曲线与对比终值合并一个 useMemo: 同一 lump 对象只跑一遍 dcaSeries(引用稳定,
+  // WeakMap 缓存可共享); final 取序列末元素, 与 computeStats(lump).finalValue 恒等
+  // (结构恒等: computeStats 的 finalValue 同取该序列的 [end-start] 元素), 不再对第二个对象全量跑 computeStats
+  const lumpCompare = useMemo(() => {
     if (!compare || !monthly) return null;
     const invested = dcaInvested(input);
-    const lumpInput = { ...input, amount: invested, monthly: undefined };
-    return computeStats(lumpInput).finalValue;
+    const series = dcaSeries({ ...input, amount: invested, monthly: undefined });
+    return { series, final: series[input.end - input.start] };
   }, [compare, monthly, input]);
+  // 下游引用名不变; 注意组件 prop 名 compare 是布尔, 勿混淆
+  const compareSeries = lumpCompare?.series;
+  const lumpFinal = lumpCompare?.final;
   // prefers-reduced-motion: 关脉冲/闪光/CSS 动画, 自动播放直跳终点
   const reduced = useMemo(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -139,6 +154,9 @@ export default function ReplayExperience({
   const amountLabel = money(amount, locale, stock.ccy);
   const monthlyLabel = monthly ? money(monthly, locale, stock.ccy) : '';
   const stockName = locale === 'zh' ? stock.zh : stock.en;
+  // 结算卡盈亏括号随 locale: 英文站用半角, 不再出现全角（）
+  const pb = locale === 'zh' ? '（' : '(';
+  const pe = locale === 'zh' ? '）' : ')';
   const title = monthly
     ? t.titleBuyDca(year, amountLabel, monthlyLabel, stockName)
     : t.titleBuyIn(year, amountLabel, stockName);
@@ -314,6 +332,35 @@ export default function ReplayExperience({
     };
   }, []);
 
+  // 结算卡出现即把焦点移入卡片(小屏 fixed 全屏弹层, 不让焦点残留在背景控件);
+  // 只在用户可见的 done false→true 转场(回放终点/拖到终点)移焦 — reduced-motion
+  // 挂载即 scrub(1) 的自动开卡不算转场, 不抢焦点
+  useEffect(() => {
+    if (done && !prevDoneRef.current) finaleRef.current?.focus();
+    prevDoneRef.current = done;
+  }, [done]);
+
+  // Esc 关闭结算卡: window 级监听(焦点 Tab 出卡也生效); 关卡前清掉在途的
+  // 900ms setDone(true) 终点定时器, 否则卡会在关闭后复活, 焦点回到播放键
+  useEffect(() => {
+    if (!stats) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      window.clearTimeout(finaleTimerRef.current);
+      setDone(false);
+      playBtnRef.current?.focus();
+    };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [stats]);
+
+  // 结算卡关闭(Esc/重播/拖离终点)即中止在途视频导出: 进度/取消控件随卡消失,
+  // 不中止会在数分钟后突然弹出下载; abort → 既有 AbortError 静默路径, 按钮自动复位
+  // (与移动端切后台中止同款语义: 用户主动关掉承载界面 = 放弃导出)
+  useEffect(() => {
+    if (!done && videoPct != null) videoAbortRef.current?.abort();
+  }, [done, videoPct]);
+
   // 视频导出进行中: 关闭/刷新页面前提醒, 防误触丢掉几分钟的编码
   useEffect(() => {
     if (videoPct == null) return;
@@ -321,8 +368,19 @@ export default function ReplayExperience({
       e.preventDefault();
       e.returnValue = '';
     };
+    // 移动端切后台: rAF 停转 + 系统随时回收页面, 几分钟编码必白费 → 主动中止
+    // (abort → AbortError → 静默路径, 按钮自动复位); 桌面切标签页继续编码的既有
+    // 行为不变, 故限定 pointer:coarse
+    const onVis = () => {
+      if (document.visibilityState === 'hidden' && window.matchMedia('(pointer: coarse)').matches)
+        videoAbortRef.current?.abort();
+    };
     window.addEventListener('beforeunload', guard);
-    return () => window.removeEventListener('beforeunload', guard);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('beforeunload', guard);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [videoPct]);
 
   // 卸载时清理终点计时器 + 中止进行中的视频导出
@@ -365,12 +423,19 @@ export default function ReplayExperience({
 
   // reduced-motion: 首次自动播放改为直接定格终点出结算卡
   useEffect(() => {
-    if (reduced) scrub(1);
+    if (reduced) {
+      // 挂载自动开卡非用户转场: 先标 prevDone, 让上面的焦点 effect 不把焦点抢进卡
+      prevDoneRef.current = true;
+      scrub(1);
+    }
   }, [reduced, scrub]);
 
   // ── 快捷键: 空格=播放/暂停(终点重播) ←/→=快退/快进5s R=重播 ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // 结算卡打开时全局播放快捷键全部让位: 空格回归浏览器默认(激活卡内聚焦按钮),
+      // ←/→ 不再经全局 scrub 意外关卡
+      if (stats) return;
       const el = e.target as HTMLElement | null;
       if (
         el &&
@@ -400,7 +465,7 @@ export default function ReplayExperience({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [duration, restart, scrub]);
+  }, [duration, restart, scrub, stats]);
 
   /** 进度条拖动: 按下先暂停(看清单帧), 松手恢复原播放状态 — 手感与主流播放器一致 */
   const scrubStart = () => {
@@ -454,7 +519,7 @@ export default function ReplayExperience({
   };
 
   const shareLink = async () => {
-    const base = locale === 'en' ? '/en/replay/' : '/replay/';
+    const base = lp(locale, '/replay');
     const dcaQ = monthly ? `&m=dca&monthly=${monthly}${compare ? '&compare=1' : ''}` : '';
     const memeQ = meme ? `&mtext=${encodeURIComponent(meme)}` : ''; // 梗文案随链接传播, 分享出去的回放不丢副标题
     const url = `${location.origin}${base}?s=${stock.key}&y=${year}&a=${amount}${dcaQ}${memeQ}`;
@@ -510,8 +575,12 @@ export default function ReplayExperience({
       a.download = `whatif-${stock.key}-${year}${monthly ? '-dca' : ''}.mp4`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
-    } catch {
-      /* 编码失败/中止静默恢复按钮 */
+    } catch (err) {
+      /* 用户取消(AbortError)保持静默; 真失败可见反馈, 按钮本身即重试入口(与海报路径一致) */
+      if ((err as DOMException | null)?.name !== 'AbortError') {
+        setVideoFail(true);
+        setTimeout(() => setVideoFail(false), 2600);
+      }
     } finally {
       videoAbortRef.current = null;
       setVideoPct(null);
@@ -526,6 +595,7 @@ export default function ReplayExperience({
         <div className="flex min-w-0 flex-col gap-1.5 self-start pt-1 sm:col-start-1 sm:row-start-1 sm:row-span-2">
           <Link
             href={homeHref}
+            prefetch={false}
             className="inline-flex items-center gap-1 text-xs text-ink-950/50 transition hover:text-ink-950"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
@@ -543,7 +613,7 @@ export default function ReplayExperience({
         </div>
 
         <div className="col-span-2 min-w-0 text-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
-          <h1 className="line-clamp-2 text-xl font-black leading-snug tracking-tight sm:line-clamp-none sm:text-3xl">
+          <h1 className="line-clamp-2 text-balance text-xl font-black leading-snug tracking-tight sm:line-clamp-none sm:text-3xl">
             {locale === 'zh' ? (
               monthly ? (
                 <>
@@ -591,7 +661,7 @@ export default function ReplayExperience({
             <span ref={plRef} className="tabular-nums">
               +0万
             </span>
-            <span ref={dateRef} className="text-ink-950/40 tabular-nums">
+            <span ref={dateRef} className="text-ink-950/60 tabular-nums">
               {series.dates[input.start].slice(0, 4)}-
               {series.dates[input.start].slice(4, 6)}
             </span>
@@ -626,7 +696,16 @@ export default function ReplayExperience({
             lg+(宽画布)回到画布内嵌; 卡身限高可滚, 兜底超矮视口(折叠屏外屏/横屏) */}
         {stats && (
           <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white/70 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-sm lg:absolute lg:z-auto lg:p-4 lg:pb-4">
-            <div className="wi-pop max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-lg border border-ink-950/12 bg-white/95 p-5 text-center shadow-[0_24px_64px_-24px_rgba(17,17,20,0.35)] lg:max-h-none lg:overflow-visible lg:p-7" role="status">
+            {/* aria-modal: 主要形态是小屏 fixed 全屏遮罩(真模态); lg 画布内嵌形态一并声明,
+                读屏统一按模态对话框播报上下文切换, 避免两种形态播报不一致 */}
+            <div
+              ref={finaleRef}
+              tabIndex={-1}
+              role="dialog"
+              aria-modal="true"
+              aria-label={t.finalReturn}
+              className="wi-pop max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-lg border border-ink-950/12 bg-white/95 p-5 text-center shadow-[0_24px_64px_-24px_rgba(17,17,20,0.35)] lg:max-h-none lg:overflow-visible lg:py-7 lg:px-5"
+            >
               <div className="mx-auto inline-flex rounded-[4px] border border-ink-950/15 bg-ink-950/[0.03] px-4 py-1 font-mono text-[11px] uppercase tracking-[0.25em] text-ink-950/50">
                 {t.finalReturn}
               </div>
@@ -641,14 +720,14 @@ export default function ReplayExperience({
                 <span className="font-bold text-ink-950">
                   <CountUp target={stats.finalValue} format={(v) => money(v, locale, stock.ccy)} duration={1300} reduced={reduced} />
                 </span>
-                （{stats.profit >= 0 ? t.profit : t.loss}{' '}
+                {locale === 'en' ? ' ' : ''}{pb}{stats.profit >= 0 ? t.profit : t.loss}{' '}
                 <span
                   className="font-bold"
                   style={{ color: stats.profit >= 0 ? UP : DOWN }}
                 >
                   {profit(stats.profit, locale, stock.ccy)}
                 </span>
-                ）
+                {pe}
               </p>
               {stats.invested != null && (
                 <p className="mt-1 text-xs text-ink-950/50">
@@ -675,7 +754,7 @@ export default function ReplayExperience({
                   onClick={shareImage}
                   disabled={shareBusy}
                   aria-label={shareBusy ? t.generating : posterMsg === 'fail' ? t.posterFail : t.genPoster}
-                  className={`wi-rise whitespace-nowrap rounded-md px-2 py-2.5 text-sm font-semibold transition active:scale-95 disabled:opacity-50 ${
+                  className={`wi-rise whitespace-nowrap rounded-md px-2 sm:px-1.5 py-2.5 text-[13px] font-semibold transition active:scale-95 disabled:opacity-50 ${
                     posterMsg === 'fail'
                       ? 'border border-gain/50 bg-white text-gain'
                       : posterMsg === 'ok'
@@ -689,17 +768,17 @@ export default function ReplayExperience({
                   <button
                     type="button"
                     onClick={exportVideo}
-                    aria-label={videoPct != null ? `${t.exporting(videoPct)} · ${t.cancelExport}` : t.exportVideo}
-                    className="wi-rise whitespace-nowrap rounded-md border border-ink-950/15 bg-white px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/35 active:scale-95"
+                    aria-label={videoPct != null ? `${t.exporting(videoPct)} · ${t.cancelExport}` : videoFail ? t.posterFail : t.exportVideo}
+                    className="wi-rise whitespace-nowrap rounded-md border border-ink-950/15 bg-white px-2 sm:px-1.5 py-2.5 text-[13px] font-semibold text-ink-950/80 transition hover:border-ink-950/35 active:scale-95"
                     style={{ animationDelay: '60ms' }}
                   >
-                    {videoPct != null ? `${videoPct}% · ${t.cancelExport}` : t.exportVideo}
+                    {videoPct != null ? `${videoPct}% · ${t.cancelExport}` : videoFail ? t.posterFail : t.exportVideo}
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={shareLink}
-                  className="wi-rise whitespace-nowrap rounded-md border border-ink-950/15 bg-white px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/35 active:scale-95"
+                  className="wi-rise whitespace-nowrap rounded-md border border-ink-950/15 bg-white px-2 sm:px-1.5 py-2.5 text-[13px] font-semibold text-ink-950/80 transition hover:border-ink-950/35 active:scale-95"
                   style={{ animationDelay: '120ms' }}
                 >
                   {copied ? t.copied : t.copyLink}
@@ -707,7 +786,7 @@ export default function ReplayExperience({
                 <button
                   type="button"
                   onClick={restart}
-                  className="wi-rise whitespace-nowrap rounded-md border border-ink-950/15 bg-white px-2 py-2.5 text-sm font-semibold text-ink-950/80 transition hover:border-ink-950/35 active:scale-95"
+                  className="wi-rise whitespace-nowrap rounded-md border border-ink-950/15 bg-white px-2 sm:px-1.5 py-2.5 text-[13px] font-semibold text-ink-950/80 transition hover:border-ink-950/35 active:scale-95"
                   style={{ animationDelay: '180ms' }}
                 >
                   {t.replayAgain}
@@ -739,6 +818,7 @@ export default function ReplayExperience({
       {/* ════════ 播放控制(时间轴控制台; 移动端收窄间距/隐重播键, 给进度条让出拖拽宽度) ════════ */}
       <div className="mt-3 flex items-center gap-2 sm:gap-3">
         <button
+          ref={playBtnRef}
           type="button"
           onClick={() => (tRef.current >= 1 ? restart() : setPlaying((p) => !p))}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-ink-950/12 bg-white text-ink-950 transition hover:border-ink-950/40 active:scale-95"
@@ -802,7 +882,7 @@ export default function ReplayExperience({
           </svg>
         </button>
       </div>
-      <p className="mt-2 hidden text-center text-[10px] text-ink-950/35 sm:block">{t.kbdHint}</p>
+      <p className="mt-2 hidden text-center text-[10px] text-ink-950/60 sm:block">{t.kbdHint}</p>
     </div>
   );
 }

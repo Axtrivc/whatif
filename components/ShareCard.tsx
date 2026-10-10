@@ -33,7 +33,7 @@ const COPY = {
     now: '现价',
   },
   en: {
-    boughtIn: (y: string) => 'If you had bought in',
+    boughtIn: (y: string) => `If you had bought in ${y}`,
     holding: ' · buy & hold · div. reinvested',
     dcaHolding: (m: string) => ` · plus ${m}/mo · div. reinvested`,
     invested: 'Total invested',
@@ -165,7 +165,7 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
   // 迷你走势线(全程): 用资产序列(份额法)而非原始价 —— 一次性买入两者形状一致,
   // 定投海报则与头部最终市值同口径(曲线含每月追加的阶梯增长)
   const cTop = H * 0.62;
-  const cBottom = H * 0.88;
+  const cBottom = H * 0.82;
   const cW = W - P * 2;
   const vs = dcaSeries(input);
   const nPts = vs.length - 1;

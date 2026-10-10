@@ -283,7 +283,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
           onKeyDown={(e) => e.key === 'Enter' && play()}
           placeholder={t.customAmount}
           aria-label={t.customAmountAria}
-          className="w-28 rounded-md border border-ink-950/10 bg-white py-2 pl-4 pr-3 font-mono text-base text-ink-950 placeholder:text-ink-950/25 focus:border-ink-950/50 focus:outline-none sm:text-sm"
+          className="w-40 rounded-md border border-ink-950/10 bg-white py-2 pl-4 pr-3 font-mono text-base text-ink-950 placeholder:text-ink-950/25 focus:border-ink-950/50 focus:outline-none sm:w-36 sm:text-sm"
         />
       </div>
 
@@ -320,7 +320,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
               onKeyDown={(e) => e.key === 'Enter' && play()}
               placeholder={t.customAmount}
               aria-label={t.pickMonthly}
-              className="w-24 rounded-md border border-ink-950/10 bg-white py-1.5 pl-3.5 pr-3 font-mono text-base text-ink-950 placeholder:text-ink-950/25 focus:border-ink-950/50 focus:outline-none sm:text-xs"
+              className="w-40 rounded-md border border-ink-950/10 bg-white py-1.5 pl-3.5 pr-3 font-mono text-base text-ink-950 placeholder:text-ink-950/25 focus:border-ink-950/50 focus:outline-none sm:w-32 sm:text-xs"
             />
           </div>
         </div>

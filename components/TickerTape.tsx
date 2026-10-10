@@ -61,7 +61,7 @@ export default function TickerTape() {
       {items.map((it) => {
         const up = it.chg >= 0;
         return (
-          <span key={`${dup}-${it.key}`} className="mx-5 inline-flex items-baseline gap-1.5 font-mono text-xs">
+          <span key={`${dup}-${it.key}`} className="group mx-5 inline-flex items-baseline gap-1.5 font-mono text-xs">
             <span className="text-ink-950/60">
               {enNames ? STOCK_MAP[it.key]?.en ?? it.zh : it.zh}
             </span>

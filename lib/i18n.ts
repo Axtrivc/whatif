@@ -2,16 +2,18 @@
  * 站点多语言字典 — 中文为默认(根路径), 英文挂 /en/ 前缀
  * 静态导出无路由参数可用, 组件一律显式接收 locale 或 dict
  */
+import type { Market } from './stocks.ts';
 
 export type Locale = 'zh' | 'en';
 
 export const LOCALES: Locale[] = ['zh', 'en'];
 
-/** 路径辅助: 中文不带前缀, 英文加 /en */
+/** 路径辅助: 中文不带前缀, 英文加 /en; 已有尾斜杠不重复追加 */
 export function lp(locale: Locale, path: string): string {
   if (path === '/' && locale === 'zh') return '/';
   const p = path === '/' ? '' : path;
-  return locale === 'en' ? `/en${p}/` : p.endsWith('/') ? p : `${p}/`;
+  const base = locale === 'en' ? `/en${p}` : p;
+  return base.endsWith('/') ? base : `${base}/`;
 }
 
 const zh = {
@@ -31,8 +33,8 @@ const zh = {
   customAmount: '自定义金额',
   amountLabel: (a: number) => (a >= 10000 ? `${a / 10000}万` : String(a)),
   startReplay: '开始穿越 ▶',
-  replaySummary: (year: number, amount: string, _ccyPrefix: string) =>
-    `${year} 年投入 ${amount} · 一直持有到今天`,
+  replaySummary: (year: number, amount: string, _ccyPrefix: string, monthly?: string) =>
+    `${year} 年投入 ${amount}${monthly ? ` + 每月 ${monthly}` : ''} · 一直持有到今天`,
   dataMissing: '数据文件缺失，请先运行',
   yearAria: '年份',
   customAmountAria: '自定义本金金额',
@@ -123,7 +125,7 @@ const zh = {
     '口径说明：采用后复权价格（分红按除息日再投资近似），不含交易税费；加密货币与商品以美元计价。历史数据来自公开市场，可能存在误差。历史表现不代表未来，本页面不构成投资建议。',
   anotherIf: '换一个「假如」',
   dcaCompare: '定投 vs 一次性买入',
-  dcaCompareIntro: '同样的钱，两种买法差多少？',
+  dcaCompareIntro: '两行总投入不同：定投持续追加，一次性一笔投完——收益率各按自身总投入计算',
   dcaColMode: '方式',
   dcaColInvested: '累计投入',
   dcaColFinal: '最终市值',
@@ -131,6 +133,7 @@ const zh = {
   dcaModeLump: '一次性买入',
   dcaModeDca: '每月定投',
   dcaTryIt: '▶ 看定投回放',
+  dcaCompareSideBySide: '▶ 同屏对比回放',
 
   footerNote: '© 2026 whatif.axtrivc.com · 姊妹站',
   dataAsOf: (d: string) => `数据截至 ${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`,
@@ -155,8 +158,8 @@ const en: Dict = {
   customAmount: 'Custom amount',
   amountLabel: (a: number) => (a >= 1e6 ? `${a / 1e6}M` : a >= 10000 ? `${a / 1000}K` : String(a)),
   startReplay: 'Start Replay ▶',
-  replaySummary: (year: number, amount: string, ccyPrefix: string) =>
-    `Invested ${ccyPrefix}${amount} in ${year} · held until today`,
+  replaySummary: (year: number, amount: string, ccyPrefix: string, monthly?: string) =>
+    `Invested ${ccyPrefix}${amount}${monthly ? ` + ${monthly}/mo` : ''} in ${year} · held until today`,
   dataMissing: 'Data files missing. Run',
   yearAria: 'Year',
   customAmountAria: 'Custom principal amount',
@@ -247,7 +250,7 @@ const en: Dict = {
     'Methodology: total-return adjusted prices (dividend reinvestment approximated); taxes excluded; crypto and commodities priced in USD. Historical data from public markets may contain errors. Past performance does not predict the future. Not investment advice.',
   anotherIf: 'Try another "what if"',
   dcaCompare: 'DCA vs Lump Sum',
-  dcaCompareIntro: 'Same money, two ways to buy — how different?',
+  dcaCompareIntro: 'Different total investments: DCA keeps adding monthly, lump sum pays once — each return is on its own invested total',
   dcaColMode: 'Mode',
   dcaColInvested: 'Invested',
   dcaColFinal: 'Final value',
@@ -255,6 +258,7 @@ const en: Dict = {
   dcaModeLump: 'Lump sum',
   dcaModeDca: 'Monthly DCA',
   dcaTryIt: '▶ Watch DCA Replay',
+  dcaCompareSideBySide: '▶ Side-by-side Replay',
 
   footerNote: '© 2026 whatif.axtrivc.com · Sister site',
   dataAsOf: (d: string) => `Data as of ${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`,
@@ -293,7 +297,7 @@ export const TAGLINE_EN: Record<string, string> = {
   btc: '$10.9 in 2011 — what about today?',
 };
 
-export const MARKET_LABEL_I18N: Record<Locale, Record<StockMarket, string>> = {
+export const MARKET_LABEL_I18N: Record<Locale, Record<Market, string>> = {
   zh: {
     nasdaq: '纳斯达克',
     nyse: '纽交所',
@@ -313,5 +317,3 @@ export const MARKET_LABEL_I18N: Record<Locale, Record<StockMarket, string>> = {
     ashare: 'A-shares',
   },
 };
-
-type StockMarket = 'nasdaq' | 'nyse' | 'index' | 'gold' | 'crypto' | 'hk' | 'ashare';

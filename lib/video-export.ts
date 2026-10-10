@@ -6,27 +6,44 @@
  *
  * 时长策略: 回放动画本身 45-240s, 直接 1:1 导出太长; 按目标 ≤45s 视频等比
  * 提高时间倍率(采样同一条渲染曲线, 只是 t 推进更快)。
- * 降级: VideoEncoder 不可用(旧浏览器/Firefox)时调用方隐藏入口。
+ * 降级: 异步探测 AVC 编码不可用(旧浏览器/Firefox 部分版本)时调用方隐藏入口。
  */
 import type { ArrayBufferTarget as Mp4ArrayBufferTarget } from 'mp4-muxer';
 import { durationFor, type ReplayInput } from '@/lib/engine';
 import { renderFrame, type SmoothState } from '@/components/replay-render';
 import type { Locale } from '@/lib/i18n';
 
-export function videoExportSupported(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    'VideoEncoder' in window &&
-    'VideoFrame' in window &&
-    typeof document !== 'undefined'
-  );
-}
-
 const VW = 1280;
 const VH = 720;
 const FPS = 30;
 const TARGET_SEC = 45; // 视频目标时长上限
 const MIN_SEC = 12; // 太短的回放不加速, 保底时长
+
+let supportProbe: Promise<boolean> | null = null; // 会话级缓存: 只探一次
+
+/** 能力探测(异步): API 存在 ≠ 可编码 — Firefox 130+ 暴露 VideoEncoder 但 AVC 编码是
+ *  WebCodecs 可选能力, 按钮出现却必然失败 → isConfigSupported 实测, 结果按会话缓存。 */
+export function videoExportSupported(): Promise<boolean> {
+  if (!supportProbe) {
+    supportProbe = (async () => {
+      if (typeof window === 'undefined' || typeof document === 'undefined') return false;
+      if (!('VideoEncoder' in window) || !('VideoFrame' in window)) return false;
+      try {
+        const r = await VideoEncoder.isConfigSupported({
+          codec: 'avc1.640028', // 与下方 enc.configure 同档
+          width: VW,
+          height: VH,
+          bitrate: 4_500_000,
+          framerate: FPS,
+        });
+        return r.supported === true;
+      } catch {
+        return false;
+      }
+    })();
+  }
+  return supportProbe;
+}
 
 interface ExportOpts {
   input: ReplayInput;
@@ -60,7 +77,7 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
     fastStart: 'in-memory',
   });
 
-  // 编码器错误在回调里抛出不会传给 await 链, 先捕获再在循环/收尾处检查
+  // 编码器错误在回调里抛出不会传给 await 链, 先捕获再在循环/收尾处检查, finally 统一释放
   let encError: DOMException | null = null;
   const enc = new VideoEncoder({
     output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
@@ -77,22 +94,52 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
   });
 
   const usPerFrame = 1e6 / FPS;
-  for (let f = 0; f < totalFrames; f++) {
-    if (signal?.aborted) {
-      enc.close();
-      throw new DOMException('aborted', 'AbortError');
+  // frame/encoder 统一在 finally 释放: encode 同步抛错或 flush reject 都不漏资源
+  let frame: VideoFrame | null = null;
+  try {
+    for (let f = 0; f < totalFrames; f++) {
+      if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+      if (encError) throw encError;
+      const t = Math.min(1, (f * speed) / (animSec * FPS));
+      renderFrame(ctx, {
+        w: VW,
+        h: VH,
+        dpr: 1,
+        t,
+        // 合成时间戳(视频时间 30fps 节奏): 阻尼/脉冲环由 ts 差驱动, 用墙钟会让
+        // 每次导出结果不确定且缓动随让出主线程的间隙漂移 — 确定性渲染的关键
+        ts: (f * 1000) / FPS,
+        input,
+        smooth,
+        watermark: 'whatif.axtrivc.com',
+        locale,
+        ccy,
+        compareSeries,
+      });
+      frame = new VideoFrame(cv, {
+        timestamp: Math.round(f * usPerFrame),
+        duration: Math.round(usPerFrame),
+      });
+      enc.encode(frame, { keyFrame: f % (FPS * 2) === 0 });
+      frame.close();
+      frame = null;
+      if (f % 6 === 0) {
+        onProgress?.(f / totalFrames);
+        // 编码队列背压: 渲染快于编码时让出主线程等队列排空, 防内存堆积
+        while (enc.encodeQueueSize > 12 && !encError) {
+          await new Promise((r) => setTimeout(r, 1));
+        }
+        await new Promise((r) => setTimeout(r, 0)); // 让出主线程, 保 UI 可响应
+      }
     }
-    if (encError) {
-      enc.close();
-      throw encError;
-    }
-    const t = Math.min(1, (f * speed) / (animSec * FPS));
+    // 终局帧: 主循环末帧 t=(totalFrames-1)/totalFrames<1, 补一帧 t=1 —
+    // 分享视频定格在完整终局(读数芯片/日期框为终值), 而非差一帧未走完的状态
     renderFrame(ctx, {
       w: VW,
       h: VH,
       dpr: 1,
-      t,
-      ts: performance.now(),
+      t: 1,
+      ts: (totalFrames * 1000) / FPS,
       input,
       smooth,
       watermark: 'whatif.axtrivc.com',
@@ -100,30 +147,24 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
       ccy,
       compareSeries,
     });
-    const frame = new VideoFrame(cv, {
-      timestamp: Math.round(f * usPerFrame),
+    frame = new VideoFrame(cv, {
+      timestamp: Math.round(totalFrames * usPerFrame),
       duration: Math.round(usPerFrame),
     });
-    enc.encode(frame, { keyFrame: f % (FPS * 2) === 0 });
+    enc.encode(frame, { keyFrame: false });
     frame.close();
-    if (f % 6 === 0) {
-      onProgress?.(f / totalFrames);
-      // 编码队列背压: 渲染快于编码时让出主线程等队列排空, 防内存堆积
-      while (enc.encodeQueueSize > 12 && !encError) {
-        await new Promise((r) => setTimeout(r, 1));
-      }
-      await new Promise((r) => setTimeout(r, 0)); // 让出主线程, 保 UI 可响应
-    }
+    frame = null;
+    if (encError) throw encError;
+    onProgress?.(1);
+    await enc.flush();
+    if (encError) throw encError;
+    muxer.finalize();
+    const { buffer } = muxer.target as Mp4ArrayBufferTarget;
+    return new Blob([buffer], { type: 'video/mp4' });
+  } finally {
+    frame?.close(); // encode 抛错时帧可能未关
+    try {
+      enc.close(); // 对已 closed 的编码器安全, 兜底再包一层
+    } catch {}
   }
-  if (encError) {
-    enc.close();
-    throw encError;
-  }
-  onProgress?.(1);
-  await enc.flush();
-  enc.close();
-  if (encError) throw encError;
-  muxer.finalize();
-  const { buffer } = muxer.target as Mp4ArrayBufferTarget;
-  return new Blob([buffer], { type: 'video/mp4' });
 }

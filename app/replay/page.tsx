@@ -15,7 +15,7 @@ export default function ReplayPage() {
       <Suspense
         fallback={
           <div className="flex min-h-dvh items-center justify-center">
-            <div className="animate-pulse font-mono text-sm text-white/40">loading…</div>
+            <div className="animate-pulse font-mono text-sm text-ink-950/60">loading…</div>
           </div>
         }
       >

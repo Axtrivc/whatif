@@ -9,30 +9,47 @@ interface Props {
   ctaLabel: string;
 }
 
-/** 全站统一站头 — 品牌标识(问号方块 + 站名/副行) + 语言切换 + 主行动按钮 */
+/** 全站统一站头 — 品牌标识(问号方块 + 站名/副行) + 语言切换 + 主行动按钮
+ *  英文品牌名(22 字符)与 CTA(▶ Watch Replay)在 390px 窄屏折行导致站头失衡:
+ *  en 走紧凑档(品牌名 13px/CTA 11px/收窄内边距), 中文文案短维持原档; ≥sm 恢复统一原档 */
 export default function SiteHeader({ locale, ctaHref, ctaLabel }: Props) {
   const t = dict(locale);
+  const compact = locale === 'en';
   return (
     <header className="flex items-center justify-between py-6">
-      <Link href={lp(locale, '/')} className="flex items-center gap-2.5" aria-label={t.siteName}>
+      <Link
+        href={lp(locale, '/')}
+        prefetch={false}
+        className="flex min-w-0 items-center gap-2.5"
+        aria-label={t.siteName}
+      >
         <span
           aria-hidden
-          className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink-950 text-lg font-black text-white"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink-950 text-lg font-black text-white"
         >
           ?
         </span>
         <span>
-          <span className="block text-base font-extrabold leading-tight">{t.siteName}</span>
+          <span
+            className={`block font-extrabold leading-tight min-[360px]:whitespace-nowrap ${
+              compact ? 'text-[13px] tracking-tight sm:text-base sm:tracking-normal' : 'text-base'
+            }`}
+          >
+            {t.siteName}
+          </span>
           <span className="block font-mono text-[10px] uppercase tracking-[0.2em] text-ink-950/40">
             {t.brandSub}
           </span>
         </span>
       </Link>
-      <div className="flex items-center gap-2">
+      <div className={`flex shrink-0 items-center ${compact ? 'gap-1.5 sm:gap-2' : 'gap-2'}`}>
         <LangSwitch locale={locale} />
         <Link
           href={ctaHref}
-          className="rounded-md border border-ink-950/10 bg-white px-4 py-1.5 text-xs font-semibold text-ink-950/60 transition hover:border-ink-950/30 hover:text-ink-950"
+          prefetch={false}
+          className={`whitespace-nowrap rounded-md border border-ink-950/10 bg-white py-1.5 font-semibold text-ink-950/60 transition hover:border-ink-950/30 hover:text-ink-950 ${
+            compact ? 'px-2 text-[11px] sm:px-4 sm:text-xs' : 'px-4 text-xs'
+          }`}
         >
           {ctaLabel}
         </Link>
