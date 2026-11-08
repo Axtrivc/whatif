@@ -43,10 +43,11 @@ export function moneyEn(v: number, ccy = 'USD'): string {
   return Number.isInteger(abs) ? `${sign}${sym}${abs}` : `${sign}${sym}${abs.toFixed(2)}`;
 }
 
-/** 涨幅: +244.02% / -91.83% */
+/** 涨幅: +244.02% / -91.83%; |v×100| ≥ 1000 时强制 0 位小数(+627523%, 万倍级紧凑化防溢出) */
 export function pct(v: number, digits = 2): string {
   const sign = v >= 0 ? '+' : '-';
-  return `${sign}${(Math.abs(v) * 100).toFixed(digits)}%`;
+  const p = Math.abs(v) * 100;
+  return `${sign}${p.toFixed(p >= 1000 ? 0 : digits)}%`;
 }
 
 /** 倍数: ×24.4 */

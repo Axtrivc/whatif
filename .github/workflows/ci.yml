@@ -1,0 +1,38 @@
+# WhatIf CI
+# - ci: npm ci → lint(tsc --noEmit) → test(node --test) → build(next build 静态导出,
+#   prebuild 钩子跑非严格 check-data: 缺口类硬门禁生效, 陈旧类仅告警)
+# - data-freshness: CHECK_DATA_STRICT=1 严格口径独立跑数据门禁(陈旧 >10 天计失败)。
+#   check-data 零依赖(仅 node:fs), 无需 npm ci
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  data-freshness:
+    runs-on: ubuntu-latest
+    # 暂设 true: 存量东财标的数据陈旧(58-72 天), 首次人工刷新数据后改回 false
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-data.mjs
+        env:
+          CHECK_DATA_STRICT: '1'

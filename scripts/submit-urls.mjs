@@ -19,11 +19,11 @@ const SITE_URL = (process.env.SITE_URL || 'https://whatif.axtrivc.com').replace(
 const KEY = process.env.INDEXNOW_KEY || 'e79a9da1efb517e5dc4b2f3fada51d11';
 const ENDPOINTS = ['https://api.indexnow.org/indexnow', 'https://www.bing.com/indexnow'];
 
-/** 从 lib/stocks.ts 的 STOCKS 条目提取全部 key(数据文件名 / URL slug) */
+/** 从 lib/stocks.ts 的 STOCKS 条目提取全部 key(数据文件名 / URL slug); 引号组 ['"] 兼容双引号风格(与 check-data 同款) */
 function stockKeys() {
   const src = readFileSync(join(ROOT, 'lib', 'stocks.ts'), 'utf8');
   const out = [];
-  const re = /key:\s*'([a-z0-9-]+)'/g;
+  const re = /key:\s*['"]([a-z0-9-]+)['"]/g;
   let m;
   while ((m = re.exec(src)) !== null) out.push(m[1]);
   return [...new Set(out)];

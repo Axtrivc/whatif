@@ -38,8 +38,9 @@ npm run lint        # TypeScript 类型检查
 npm run build       # 静态导出到 out/（prebuild 先跑数据完整性校验; 构建后自动把英文站产物 lang 改为 en）
 ```
 
-> OG 分享图：中文版为 tools/og-src.html 模板 → 浏览器以 1200×630 截图存 public/og.png；
-> 英文版由 app/en/opengraph-image.tsx 构建期自动生成。
+> OG 分享图：全部由 opengraph-image.tsx 构建期自动生成 — 站点级 `app/opengraph-image.tsx` 与
+> `app/en/opengraph-image.tsx`，标的级 `app/p/[stock]/` 与 `app/en/p/[stock]/` 按各标的实算倍数各出一图；
+> `tools/og-src.html` 为旧手工截图模板，仅留档。中文文案新增用字时跑 `npm run og-font` 重建子集字体。
 
 ## 数据更新
 

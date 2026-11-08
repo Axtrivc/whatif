@@ -70,6 +70,10 @@ test('pct/multiple: 百分比与倍数', () => {
   assert.equal(pct(-0.9183), '-91.83%');
   assert.equal(pct(0), '+0.00%'); // 零视为正
   assert.equal(pct(0.12345, 1), '+12.3%');
+  assert.equal(pct(6275.2330), '+627523%'); // |627523.30| ≥ 1000 → 强制 0 位小数(BTC 2013 真实 returnPct, 万倍级紧凑化)
+  assert.equal(pct(9.5), '+950.00%'); // 950 < 1000 仍保留 2 位小数
+  assert.equal(pct(-6275.2330), '-627523%'); // 负值万倍级同样紧凑
+  assert.equal(pct(10), '+1000%'); // 恰好 1000 → 0 位小数(阈值含等号)
   assert.equal(multiple(24.44), '×24.4');
   assert.equal(multiple(150.2), '×150'); // ≥100 去小数
 });
@@ -99,7 +103,7 @@ test('tokens: 币种前缀与色彩解析', () => {
   assert.equal(ccyPrefix('CNY'), '¥');
   assert.equal(ccyPrefix(''), ''); // 指数类
   assert.equal(ccyPrefix(undefined), '$'); // 缺省 USD
-  assert.equal(ccyPrefix('XYZ'), '$'); // 未知币种回退 $
+  assert.throws(() => ccyPrefix('XYZ'), /未知币种: XYZ/); // 未知非空字符串显式抛错(币种穷举化)
   assert.deepEqual(hexToRgb(GAIN), [212, 43, 58]);
   assert.deepEqual(hexToRgb(LOSS), [14, 159, 118]);
 });

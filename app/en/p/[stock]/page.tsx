@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import StockLandingContent from '@/components/StockLandingContent';
+import { dict } from '@/lib/i18n';
 import { loadSeries, STOCK_MAP } from '@/lib/stocks';
 
 interface Props {
@@ -17,8 +18,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!meta) return {};
   const series = await loadSeries(key);
   const firstYear = series ? series.first.slice(0, 4) : '';
-  const title = `If you bought ${meta.en} (${meta.symbol}) in ${firstYear}, what would it be worth today?`;
-  const description = `Historical backtest of ${meta.en} (${meta.symbol}) since ${firstYear}: an animated replay of its long-term return, with any year and amount. Total-return basis, simulation for reference only.`;
+  // metadata 与页面 H1 同源(landingTitle), 避免双源漂移; 描述走 landingMetaDesc
+  const t = dict('en');
+  const title = t.landingTitle(firstYear, meta.en, meta.symbol);
+  const description = t.landingMetaDesc(meta.en, meta.symbol, firstYear);
   return {
     title,
     description,
@@ -31,9 +34,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description,
       url: `/en/p/${key}/`,
       type: 'website',
-      images: [{ url: '/en/opengraph-image', width: 1200, height: 630, alt: title }],
+      // 页面级 openGraph 会整体替换根 layout 的(浅合并), siteName/locale 必须显式带回
+      siteName: 'WhatIf',
+      locale: 'en_US',
+      images: [{ url: `/en/p/${key}/opengraph-image`, width: 1200, height: 630, alt: title }],
     },
-    twitter: { card: 'summary_large_image', images: ['/en/opengraph-image'] },
+    twitter: { card: 'summary_large_image', images: [`/en/p/${key}/opengraph-image`] },
   };
 }
 

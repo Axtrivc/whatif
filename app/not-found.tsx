@@ -18,9 +18,9 @@ export default function NotFound() {
       <div className="font-mono text-7xl font-black text-ink-950">
         404
       </div>
-      <p className="mt-4 text-sm text-ink-950/55">
+      <p className="mt-4 text-sm text-ink-950/60">
         这个「假如」不存在 —— 也许历史里根本没有那一天。
-        <span className="block text-ink-950/35">This &quot;what if&quot; doesn&apos;t exist.</span>
+        <span className="block text-ink-950/60">This &quot;what if&quot; doesn&apos;t exist.</span>
       </p>
       <div className="mt-8 flex gap-3">
         <Link

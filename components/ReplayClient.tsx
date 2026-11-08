@@ -122,19 +122,37 @@ export default function ReplayClient({ locale = 'zh' }: { locale?: Locale }) {
   }
 
   if (!series) {
-    // 骨架屏与真实舞台同布局同尺寸, 数据到达时零跳动
+    // 骨架屏与真实布局同构: header(同款 grid 三列灰条, 左列含语言切换位) +
+    // wi-frame 舞台 + 控制条高度占位 — 数据到达时 header 不再凭空出现把舞台推下
     return (
       <div className="mx-auto w-full max-w-[1200px] px-4 py-5">
+        <header className="grid grid-cols-[1fr_auto] items-start gap-x-3 gap-y-2 border-b border-ink-950/10 pb-4 sm:grid-cols-[minmax(90px,auto)_1fr_minmax(150px,auto)] sm:gap-3">
+          <div className="flex min-w-0 flex-col gap-1.5 self-start pt-1 sm:col-start-1 sm:row-start-1 sm:row-span-2">
+            <div className="h-4 w-14 bg-ink-950/10" />
+            <div className="h-7 w-16 bg-ink-950/10" />
+            <div className="h-4 w-20 bg-ink-950/10" />
+          </div>
+          <div className="col-span-2 min-w-0 text-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+            <div className="mx-auto h-7 w-3/4 bg-ink-950/10 sm:h-9" />
+            <div className="mx-auto mt-1.5 h-4 w-1/2 bg-ink-950/10" />
+          </div>
+          <div className="col-start-2 row-start-1 pt-0.5 sm:col-start-3 sm:row-start-1">
+            <div className="ml-auto h-2.5 w-16 bg-ink-950/10" />
+            <div className="ml-auto mt-1.5 h-7 w-24 bg-ink-950/10 sm:h-12" />
+            <div className="ml-auto mt-1.5 h-3.5 w-28 bg-ink-950/10" />
+          </div>
+        </header>
         <div className="wi-frame relative mt-1">
-          <div className="flex aspect-[16/9] w-full items-center justify-center overflow-hidden rounded-md border border-ink-950/12 bg-[#fbfbfc] sm:aspect-[2.2/1]">
+          <div className="flex aspect-[16/9] w-full items-center justify-center overflow-hidden rounded-md border border-ink-950/10 bg-[#fbfbfc] sm:aspect-[2.2/1]">
             <div className="flex flex-col items-center gap-3">
               <div className="h-1 w-40 overflow-hidden rounded-full bg-ink-950/10">
                 <div className="wi-loading h-full w-1/3 rounded-full bg-ink-950/30" />
               </div>
-              <div className="font-mono text-sm text-ink-950/40">{t.loadingData}</div>
+              <div className="font-mono text-sm text-ink-950/60">{t.loadingData}</div>
             </div>
           </div>
         </div>
+        <div className="mt-3 h-9 w-full bg-ink-950/10" />
       </div>
     );
   }

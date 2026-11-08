@@ -2,13 +2,15 @@
  * 回放渲染器单元测试 — 前沿插值越界守卫 + 折线逐像素列折叠
  * (A: n=0 单点序列时 fwdVal 不再越界读 val[1] 产生 NaN;
  *  B: 全长折线按像素列折叠保留列内 y 极值下标, 深谷/尖峰不被首末弦线削平,
- *     段数与播放进度 k 解耦, 短序列恒等保留)
+ *     段数与播放进度 k 解耦, 短序列恒等保留;
+ *  C: renderFrame 盈亏显色随 locale 翻转 — zh 红涨绿跌, en 绿涨红跌)
  *
  * 运行: npm test  (node --test 直跑 TS, Node ≥22.6 类型剥离)
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { collapseIndices, fwdVal } from '../components/replay-render.ts';
+import { collapseIndices, fwdVal, renderFrame } from '../components/replay-render.ts';
+import type { ReplayInput } from '../lib/engine.ts';
 
 test('fwdVal: n=0 单点序列(start==end)返回 val[0], 不产生 NaN', () => {
   const val = new Float64Array([1234.5]); // n=0 → 序列仅 1 个点
@@ -91,4 +93,114 @@ test('collapseIndices: 整段同列保留列内极值([0,iMin,iMax,k]); k=0 单�
   const ret2 = collapseIndices(4, (j) => j, (j) => j, buf); // 同一缓冲二次使用先清空
   assert.equal(ret2, buf);
   assert.deepEqual(ret2, [0, 1, 2, 3, 4]);
+});
+
+// ════════════ C: renderFrame 盈亏显色 locale 翻转 ════════════
+// Node 无 canvas: stub 出 renderFrame 触达的全部 ctx 方法 + Path2D, 经
+// strokeStyle/fillStyle 的 setter 记录全部赋值; 单调上涨 mini 序列 + t=1 +
+// smooth={} → 首帧 smooth.f 直接取 targetF=1(盈利, 无阻尼轨迹), 色值确定可断言。
+(globalThis as { Path2D?: unknown }).Path2D ??= class {
+  moveTo() {}
+  lineTo() {}
+  closePath() {}
+};
+
+function makeStubCtx() {
+  const strokes: unknown[] = [];
+  const fills: unknown[] = [];
+  const grad = { addColorStop() {} };
+  const ctx = {
+    save() {},
+    restore() {},
+    scale() {},
+    clearRect() {},
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    arc() {},
+    arcTo() {},
+    rect() {},
+    clip() {},
+    closePath() {},
+    fill() {},
+    stroke() {},
+    setLineDash() {},
+    fillText() {},
+    measureText: () => ({ width: 42 }),
+    createLinearGradient: () => grad,
+    createRadialGradient: () => grad,
+    lineWidth: 1,
+    lineJoin: '',
+    lineCap: '',
+    font: '',
+    textAlign: '',
+    textBaseline: '',
+    set strokeStyle(v: unknown) {
+      strokes.push(v);
+    },
+    get strokeStyle(): unknown {
+      return strokes[strokes.length - 1];
+    },
+    set fillStyle(v: unknown) {
+      fills.push(v);
+    },
+    get fillStyle(): unknown {
+      return fills[fills.length - 1];
+    },
+  };
+  return { ctx, strokes, fills };
+}
+
+/** 单调上涨 mini 序列(3 点, lump-sum): t=1 时终点资产 12100 > 投入 10000 → f=1(盈利) */
+const MINI: ReplayInput = {
+  dates: ['20200102', '20200103', '20200106'],
+  closes: [100, 110, 121],
+  start: 0,
+  end: 2,
+  amount: 10_000,
+};
+
+test('renderFrame 盈利帧主线色: zh(缺省)红涨 #D42B3A, en 翻转为绿涨 #0E9F76', () => {
+  // zh(不传 locale): f=1 → lineColor=mixColor(1)='rgba(212,43,58,1)'
+  const zh = makeStubCtx();
+  renderFrame(zh.ctx as unknown as CanvasRenderingContext2D, {
+    w: 800,
+    h: 400,
+    dpr: 1,
+    t: 1,
+    ts: 1_000,
+    input: MINI,
+    smooth: {},
+  });
+  assert.ok(
+    (zh.strokes as string[]).includes('rgba(212,43,58,1)'),
+    `zh 盈利帧主线应为涨色红 #D42B3A, 实际 stroke 序列: ${JSON.stringify(zh.strokes)}`,
+  );
+
+  // en: showF=1-f=0 → lineColor=mixColor(0)='rgba(14,159,118,1)'
+  const en = makeStubCtx();
+  renderFrame(en.ctx as unknown as CanvasRenderingContext2D, {
+    w: 800,
+    h: 400,
+    dpr: 1,
+    t: 1,
+    ts: 1_000,
+    input: MINI,
+    smooth: {},
+    locale: 'en',
+  });
+  assert.ok(
+    (en.strokes as string[]).includes('rgba(14,159,118,1)'),
+    `en 盈利帧主线应为涨色绿 #0E9F76, 实际 stroke 序列: ${JSON.stringify(en.strokes)}`,
+  );
+  // 翻转互斥: en 盈利帧的描边/填色中不应再出现 zh 涨色红(准星/芯片文字一并翻转)
+  assert.ok(
+    !(en.strokes as string[]).includes('rgba(212,43,58,1)') &&
+      !(en.fills as string[]).includes('rgba(212,43,58,1)'),
+    'en 盈利帧不应出现涨色红 #D42B3A',
+  );
+  assert.ok(
+    !(zh.strokes as string[]).includes('rgba(14,159,118,1)'),
+    'zh 盈利帧不应出现涨色绿 #0E9F76',
+  );
 });

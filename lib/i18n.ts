@@ -31,6 +31,9 @@ const zh = {
   pickModeDca: '每月定投',
   pickMonthly: '每月追加',
   customAmount: '自定义金额',
+  amountFormatHint: '格式: 10万 / 1.5亿 / 50k',
+  amountMinHint: '最低 100',
+  amountInvalidHint: '金额格式无法识别',
   amountLabel: (a: number) => (a >= 10000 ? `${a / 10000}万` : String(a)),
   startReplay: '开始穿越 ▶',
   replaySummary: (year: number, amount: string, _ccyPrefix: string, monthly?: string) =>
@@ -44,9 +47,11 @@ const zh = {
   trustAssets: '标的覆盖',
   trustSince: '数据自',
   trustSpan: '年跨度',
+  dataAsOfLabel: '数据截至',
   presetPrincipal: '本金',
   yearsLater: (y: number) => `年后`,
   presetDcaTag: '定投',
+  presetLumpTag: '一次性',
 
   howItWorks: '怎么算的',
   how1Title: '真实历史数据',
@@ -63,6 +68,7 @@ const zh = {
   loadFailed: '数据加载失败, 请刷新重试',
   retry: '重试',
   loadingData: '载入历史数据…',
+  tapeToggle: '暂停/继续行情滚动',
 
   back: '返回',
   principal: (a: string) => `${a} 本金`,
@@ -81,10 +87,12 @@ const zh = {
   loss: '亏损',
   statsLine: (years: number, cagr: number, mdd: number) =>
     `${years} 年 · 年化 ${cagr}% · 最大回撤 ${mdd}%`,
+  cagrIrrNote: '定投年化为资金加权口径 (IRR)',
   genPoster: '生成分享海报',
   generating: '生成中…',
   posterDone: '已生成 ✓',
   posterFail: '生成失败 · 点重试',
+  posterFailShort: '失败 ↻',
   exportVideo: '导出视频',
   exporting: (p: number) => `导出中 ${p}%`,
   cancelExport: '取消',
@@ -103,6 +111,8 @@ const zh = {
   // 落地页 /p/[stock]
   landingTitle: (firstYear: string, name: string, symbol: string) =>
     `假如 ${firstYear} 年买入${name}（${symbol}），今天值多少钱？`,
+  landingMetaDesc: (name: string, symbol: string, firstYear: string) =>
+    `${name}(${symbol}) 自 ${firstYear} 年的历史回测与动画回放，支持任意年份与本金。`,
   landingHl: (principal: string, final: string, mult: string, pctStr: string) =>
     `${principal} → ${final}（${mult} · ${pctStr}）`,
   landingIntro: (
@@ -123,6 +133,12 @@ const zh = {
   colCagr: '年化',
   caliberNote:
     '口径说明：采用后复权价格（分红按除息日再投资近似），不含交易税费；加密货币与商品以美元计价。历史数据来自公开市场，可能存在误差。历史表现不代表未来，本页面不构成投资建议。',
+  faq1Q: '这是真实收益吗？',
+  faq1A:
+    '基于公开市场的真实历史数据计算：后复权口径（分红按除息日再投资近似），不含交易税费。历史表现不代表未来，不构成投资建议。',
+  faq2Q: '能换成定投吗？',
+  faq2A:
+    '可以——页面下方有「定投 vs 一次性买入」的真实数据对比，并提供定投回放与同屏对比回放入口。',
   anotherIf: '换一个「假如」',
   dcaCompare: '定投 vs 一次性买入',
   dcaCompareIntro: '两行总投入不同：定投持续追加，一次性一笔投完——收益率各按自身总投入计算',
@@ -147,7 +163,7 @@ const en: Dict = {
   playNow: 'Play Now →',
 
   heroSub: 'Pick a stock, a year, and an amount.',
-  heroSub2: 'Watch compound interest turn time into a miracle — day by day.',
+  heroSub2: 'Watch compound interest work, day by day.',
 
   pickStock: '① Pick an asset',
   pickYear: '② Pick a year',
@@ -156,6 +172,9 @@ const en: Dict = {
   pickModeDca: 'Monthly DCA',
   pickMonthly: 'Monthly top-up',
   customAmount: 'Custom amount',
+  amountFormatHint: 'Format: 10k / 1.5m / 50k',
+  amountMinHint: 'Min 100',
+  amountInvalidHint: 'Unrecognized amount format',
   amountLabel: (a: number) => (a >= 1e6 ? `${a / 1e6}M` : a >= 10000 ? `${a / 1000}K` : String(a)),
   startReplay: 'Start Replay ▶',
   replaySummary: (year: number, amount: string, ccyPrefix: string, monthly?: string) =>
@@ -169,9 +188,11 @@ const en: Dict = {
   trustAssets: 'Assets',
   trustSince: 'Data from',
   trustSpan: 'Years spanned',
+  dataAsOfLabel: 'Data as of',
   presetPrincipal: 'Principal',
   yearsLater: () => `yrs`,
   presetDcaTag: 'DCA',
+  presetLumpTag: 'Lump sum',
 
   howItWorks: 'How it works',
   how1Title: 'Real historical data',
@@ -188,6 +209,7 @@ const en: Dict = {
   loadFailed: 'Failed to load data, please refresh',
   retry: 'Retry',
   loadingData: 'Loading history…',
+  tapeToggle: 'Pause/resume ticker',
 
   back: 'Back',
   principal: (a: string) => `${a} invested`,
@@ -206,10 +228,12 @@ const en: Dict = {
   loss: 'Loss',
   statsLine: (years: number, cagr: number, mdd: number) =>
     `${years} yrs · CAGR ${cagr}% · Max drawdown ${mdd}%`,
+  cagrIrrNote: 'DCA annualized is money-weighted (IRR)',
   genPoster: 'Share Card',
   generating: 'Rendering…',
   posterDone: 'Saved ✓',
   posterFail: 'Failed · tap to retry',
+  posterFailShort: 'Failed ↻',
   exportVideo: 'Export Video',
   exporting: (p: number) => `Exporting ${p}%`,
   cancelExport: 'Cancel',
@@ -228,6 +252,8 @@ const en: Dict = {
 
   landingTitle: (firstYear: string, name: string, symbol: string) =>
     `If you bought ${name} (${symbol}) in ${firstYear}, what would it be worth today?`,
+  landingMetaDesc: (name: string, symbol: string, firstYear: string) =>
+    `Historical backtest and animated replay of ${name} (${symbol}) since ${firstYear}, with any year and amount.`,
   landingHl: (principal: string, final: string, mult: string, pctStr: string) =>
     `${principal} → ${final} (${mult} · ${pctStr})`,
   landingIntro: (
@@ -248,6 +274,12 @@ const en: Dict = {
   colCagr: 'CAGR',
   caliberNote:
     'Methodology: total-return adjusted prices (dividend reinvestment approximated); taxes excluded; crypto and commodities priced in USD. Historical data from public markets may contain errors. Past performance does not predict the future. Not investment advice.',
+  faq1Q: 'Are these real returns?',
+  faq1A:
+    'Computed from real historical data of public markets: total-return adjusted (dividend reinvestment approximated), taxes excluded. Past performance does not predict the future; this is not investment advice.',
+  faq2Q: 'Can I switch to DCA?',
+  faq2A:
+    'Yes — the "DCA vs Lump Sum" section below compares both with real data, with entries to a DCA replay and a side-by-side replay.',
   anotherIf: 'Try another "what if"',
   dcaCompare: 'DCA vs Lump Sum',
   dcaCompareIntro: 'Different total investments: DCA keeps adding monthly, lump sum pays once — each return is on its own invested total',
@@ -281,20 +313,37 @@ export const TAGLINE_EN: Record<string, string> = {
   ko: "Buffett's favorite",
   dis: "Mickey Mouse's century-old fairy tale",
   tsm: 'The foundry the whole world depends on',
+  jpm: 'A century-old bank that has weathered five crises',
+  v: 'Every card you swipe cuts it a slice',
+  wmt: 'A trillion-dollar empire built on penny discounts',
+  xom: 'The wholesale blood dealer of the industrial age',
   nflx: 'The company that killed the video-rental store',
   amd: 'Nearly bankrupt — then came the comeback',
   cost: 'A moat built out of membership fees',
   orcl: "The database veteran's AI second act",
+  avgo: 'The other arms dealer in the AI race',
   mcd: 'Compound interest, one burger at a time',
   intc: 'The giant that missed its era (a cautionary tale)',
   pypl: 'The former king of payments (a cautionary tale)',
   ba: 'A rough decade for an aviation icon',
   qqq: 'A basket of tech giants (ETF)',
   tencent: 'The social-and-games money machine',
+  baba: 'The first and second halves of an e-commerce empire',
+  meituan: 'Three streets of shops, one app',
+  xiaomi: 'From laughingstock to carmaker',
+  byd: 'The EV veteran Buffett bet on',
   moutai: 'The hardest liquor on A-shares',
+  catl: 'The heart supplier of electric cars',
+  cmb: 'The interest business of the retail king',
+  wuliangye: 'The other bottle, besides Moutai',
+  changjiang: 'A whole river packed into one stock',
   spx: 'The lazy benchmark: just buy the index',
+  djia: 'A hundred-year-old index, still on the clock',
+  hsi: 'The thermometer of Hong Kong stocks',
+  sse: 'Youth measured in three-thousand points',
   gold: 'The hard asset across cycles (ETF)',
   btc: '$10.9 in 2011 — what about today?',
+  eth: 'The biggest crypto experiment after BTC',
 };
 
 export const MARKET_LABEL_I18N: Record<Locale, Record<Market, string>> = {

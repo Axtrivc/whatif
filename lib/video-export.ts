@@ -143,7 +143,7 @@ export async function exportReplayVideo(opts: ExportOpts): Promise<Blob> {
       ts: (totalFrames * 1000) / FPS,
       input,
       smooth,
-      watermark: 'whatif.axtrivc.com',
+      watermark: SITE_HOST,
       locale,
       ccy,
       compareSeries,

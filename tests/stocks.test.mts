@@ -71,9 +71,9 @@ test('rawClosesOf: rawCloses 缺省回退 closes, 有则原样返回', () => {
 });
 
 test('STOCKS: 清单规模/首尾锚点 + key·symbol·secid 三重去重与字段完备', () => {
-  assert.equal(STOCKS.length, 25); // 增删标的时同步此数(check-data 输出同源计数)
+  assert.equal(STOCKS.length, 42); // 增删标的时同步此数(check-data 输出同源计数)
   assert.equal(STOCKS[0].key, 'msft'); // 展示顺序锚点: ticker.json/HomePicker 均按此序
-  assert.equal(STOCKS[STOCKS.length - 1].key, 'btc');
+  assert.equal(STOCKS[STOCKS.length - 1].key, 'eth');
   const keys = new Set<string>();
   const symbols = new Set<string>();
   const secids = new Set<string>();
@@ -165,16 +165,19 @@ test('index.json: 键集与 STOCKS 一致, first/last/points 与各数据文件�
   }
 });
 
-test('ticker.json: 顺序/中文名/代码/币种随目录, price·chg 可由数据文件末两个有效真实价复算', () => {
+test('ticker.json: { asOf, items } 结构, 顺序/中文名/代码/币种随目录, price·chg 可由数据文件末两个有效真实价复算, asOf=各文件 last 最大值', () => {
   type Tick = { key: string; zh: string; sym: string; ccy: string; price: number; chg: number };
-  const ticker = JSON.parse(readFileSync(join(DATA_DIR, 'ticker.json'), 'utf8')) as Tick[];
-  assert.deepEqual(ticker.map((t) => t.key), STOCKS.map((s) => s.key), 'ticker.json 顺序应与 STOCKS 展示顺序逐位相同');
+  const tick = JSON.parse(readFileSync(join(DATA_DIR, 'ticker.json'), 'utf8')) as { asOf: string; items: Tick[] };
+  const ticker = tick.items;
+  assert.deepEqual(ticker.map((t) => t.key), STOCKS.map((s) => s.key), 'ticker.items 顺序应与 STOCKS 展示顺序逐位相同');
   for (const [i, s] of STOCKS.entries()) {
     const t = ticker[i];
     assert.equal(t.zh, s.zh, `${s.key}: ticker.zh 与目录不一致`);
     assert.equal(t.sym, s.symbol, `${s.key}: ticker.sym 与目录不一致`);
-    // SPX 为点位报价无货币符号(TickerTape '' 语义), 其余缺省 USD
-    assert.equal(t.ccy, s.ccy ?? (s.symbol === 'SPX' ? '' : 'USD'), `${s.key}: ticker.ccy 口径不符`);
+    // 指数(market=index)为点位报价无货币符号(hsi/sse 目录显式配了 ccy 则随目录);
+    // qqq 为美元 ETF 例外(index 但计价 USD), 与 fetch-data FETCH_HINTS.tickerCcy 对应
+    const ccyExpect = s.market === 'index' ? (s.key === 'qqq' ? 'USD' : (s.ccy ?? '')) : (s.ccy ?? 'USD');
+    assert.equal(t.ccy, ccyExpect, `${s.key}: ticker.ccy 口径不符`);
     // 复算 fetch-data 的「最新真实价 + 日涨跌」: 倒序跳过 null 取末两个有效 rawCloses
     const rc = rawClosesOf(readSeries(s.key));
     let last: number | null = null;
@@ -193,6 +196,13 @@ test('ticker.json: 顺序/中文名/代码/币种随目录, price·chg 可由数
     assert.equal(t.price, Math.round(last * 100) / 100, `${s.key}: ticker.price 与数据文件不符(文件更新未重生成 ticker)`);
     assert.equal(t.chg, Math.round((last / prev - 1) * 10000) / 100, `${s.key}: ticker.chg 与数据文件不符`);
   }
+  // asOf = 全量数据文件 last 最大值(走马灯陈旧降级依据, 与 check-data 同口径)
+  assert.match(tick.asOf, /^\d{8}$/, 'ticker.asOf 应为 YYYYMMDD');
+  const maxLast = STOCKS.reduce((m, s) => {
+    const last = readSeries(s.key).last;
+    return last > m ? last : m;
+  }, '');
+  assert.equal(tick.asOf, maxLast, 'ticker.asOf 应等于各数据文件 last 最大值(文件更新未重生成 ticker)');
 });
 
 test('loadSeries: 与磁盘内容逐字段一致 / 缺失文件 null / 同 key 进程内缓存复用', async () => {

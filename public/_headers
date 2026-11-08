@@ -8,3 +8,17 @@
   Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 /_next/static/*
   Cache-Control: public, max-age=31536000, immutable
+# OG 分享图是构建期生成的无扩展名文件, Cloudflare Pages 默认按 octet-stream 下发,
+# 严格校验 MIME 的抓取器(微信/Twitter 等)不渲染 — 显式声明 image/png
+/opengraph-image
+  Content-Type: image/png
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+/en/opengraph-image
+  Content-Type: image/png
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+/p/*/opengraph-image
+  Content-Type: image/png
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+/en/p/*/opengraph-image
+  Content-Type: image/png
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400

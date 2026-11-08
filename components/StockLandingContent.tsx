@@ -5,7 +5,7 @@ import { moneyEn, moneyZh, multiple, pct } from '@/lib/format';
 import { dict, lp, MARKET_LABEL_I18N, type Locale } from '@/lib/i18n';
 import { loadSeries, startIndexForYear, STOCKS, STOCK_MAP, type Series, type StockMeta } from '@/lib/stocks';
 import { SITE_URL } from '@/lib/site';
-import { ccyPrefix } from '@/lib/tokens';
+import { CCY_ZH, ccyPrefix } from '@/lib/tokens';
 
 interface Props {
   locale: Locale;
@@ -24,11 +24,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
   const moneyC = (v: number) => (locale === 'en' ? moneyEn(v, meta.ccy) : moneyZh(v));
   const principalLabel =
     locale === 'zh'
-      ? meta.ccy === 'CNY'
-        ? '10 万人民币'
-        : meta.ccy === 'HKD'
-          ? '10 万港元'
-          : '10 万美元'
+      ? `10 万${CCY_ZH[meta.ccy ?? 'USD']}`
       : `${prefix}100K`;
 
   // 面包屑结构化数据(中英各自指向对应语言 URL)
@@ -42,8 +38,27 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
       {
         '@type': 'ListItem',
         position: 2,
-        name: t.landingTitle(String(firstYear), name, meta.symbol),
+        // 短名(名称+代码), 不用整句问句标题 — 面包屑在 SERP 会截断
+        name: locale === 'zh' ? `${name}（${meta.symbol}）` : `${name} (${meta.symbol})`,
         item: pageUrl,
+      },
+    ],
+  }).replace(/</g, '\\u003c');
+
+  // FAQPage 富摘要: 两组问答, 答案与页面可见内容同口径(faq1A 精简自 caliberNote, faq2A 指向下方定投对比区)
+  const faqJsonLd = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: [
+      {
+        '@type': 'Question',
+        name: t.faq1Q,
+        acceptedAnswer: { '@type': 'Answer', text: t.faq1A },
+      },
+      {
+        '@type': 'Question',
+        name: t.faq2Q,
+        acceptedAnswer: { '@type': 'Answer', text: t.faq2A },
       },
     ],
   }).replace(/</g, '\\u003c');
@@ -72,18 +87,33 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
   const hl = table.find((r) => r.year === firstYear);
 
   const replayHref = (y: number) => `${lp(locale, '/replay')}?s=${meta.key}&y=${y}&a=100000`;
-  const others = STOCKS.filter((s) => s.key !== meta.key && s.hot).slice(0, 5);
+  // 同市场优先(同类可比), 再拼跨市场热门 — 打破 40 标的互链单一倾向
+  const others = [
+    ...STOCKS.filter((s) => s.key !== meta.key && s.market === meta.market).slice(0, 3),
+    ...STOCKS.filter((s) => s.hot && s.key !== meta.key && s.market !== meta.market).slice(0, 2),
+  ];
 
   // 涨跌语义色按语言取向: 中文红涨绿跌(市场惯例, 默认不变); 英文绿涨红跌(英文读者直觉)。
+  // 本页两表/亮点句为 14px bold 非大字 → 绿一律用文本安全档 text-loss-strong(白底 ≈5.3:1 AA),
+  // zh 侧小字绿同步换档(a11y-focus-contrast 批); 红用 text-profit(4.8:1 已达标);
   // 只复用现有红/青绿色板, 不新增颜色
-  const upTone = locale === 'en' ? 'text-loss' : 'text-profit';
-  const downTone = locale === 'en' ? 'text-gain' : 'text-loss';
+  const upTone = locale === 'en' ? 'text-loss-strong' : 'text-profit';
+  const downTone = locale === 'en' ? 'text-gain' : 'text-loss-strong';
+  // 最佳年份 chip: 正收益保持 gain 实底; best 也浮亏时改中性墨色(不再误用涨色语义)
+  const bestChip =
+    best.stats.returnPct >= 0
+      ? 'border-gain bg-gain font-semibold text-white'
+      : 'border-ink-950 bg-ink-950 font-semibold text-white';
 
   return (
     <main className="mx-auto w-full max-w-3xl px-5 pb-16">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: breadcrumbJsonLd }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: faqJsonLd }}
       />
       <SiteHeader locale={locale} ctaHref={replayHref(firstYear)} ctaLabel={t.watchAnimation} />
 
@@ -92,7 +122,11 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
       </h1>
 
       {hl && (
-        <p className="mt-4 font-mono text-lg font-semibold text-gain">
+        <p
+          className={`mt-4 font-mono text-lg font-semibold ${
+            hl.stats.returnPct >= 0 ? upTone : downTone
+          }`}
+        >
           {t.landingHl(
             moneyC(100_000),
             moneyC(hl.stats.finalValue),
@@ -124,7 +158,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
             prefetch={false}
             className={`rounded-md border px-4 py-2 font-mono text-sm transition active:scale-95 ${
               r.year === best.year
-                ? 'border-gain bg-gain font-semibold text-white'
+                ? bestChip
                 : 'border-ink-950/10 bg-white text-ink-950/70 hover:border-gain/50 hover:bg-gain/[0.06] hover:text-gain'
             }`}
           >
@@ -137,7 +171,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
       <section className="mt-10 overflow-hidden rounded-lg border border-ink-950/10">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-ink-950/5 text-left text-xs uppercase tracking-wider text-ink-950/40">
+            <tr className="bg-ink-950/5 text-left text-xs uppercase tracking-wider text-ink-950/60">
               <th className="px-3 py-3 font-semibold sm:px-4">{t.colYear}</th>
               <th className="px-3 py-3 text-right sm:px-4 font-semibold">{t.colResult(prefix)}</th>
               <th className="px-3 py-3 text-right sm:px-4 font-semibold">{t.colMultiple}</th>
@@ -146,17 +180,18 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
           </thead>
           <tbody>
             {table.map((r) => (
-              <tr key={r.year} className="border-t border-ink-950/5 transition hover:bg-ink-950/5">
-                <td className="px-3 py-3 sm:px-4">
-                  <Link href={replayHref(r.year)} prefetch={false} className="font-mono font-bold hover:text-ink-950">
+              // 整行热区: 年份列 Link 用 after 撑满整行(stretched link), 其余单元格纯文本
+              <tr key={r.year} className="relative border-t border-ink-950/5 transition hover:bg-ink-950/5">
+                <td className="px-3 py-3 font-mono font-bold sm:px-4">
+                  <Link
+                    href={replayHref(r.year)}
+                    prefetch={false}
+                    className="after:absolute after:inset-0 hover:text-ink-950"
+                  >
                     {r.year}
                   </Link>
                 </td>
-                <td className="px-3 py-3 text-right sm:px-4 font-mono">
-                  <Link href={replayHref(r.year)} prefetch={false} className="hover:text-ink-950">
-                    {moneyC(r.stats.finalValue)}
-                  </Link>
-                </td>
+                <td className="px-3 py-3 text-right font-mono sm:px-4">{moneyC(r.stats.finalValue)}</td>
                 <td
                   className={`px-3 py-3 text-right sm:px-4 font-mono font-bold ${
                     r.stats.returnPct >= 0 ? upTone : downTone
@@ -173,14 +208,17 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
         </table>
       </section>
 
-      <p className="mt-6 text-xs leading-6 text-ink-950/50">{t.caliberNote}</p>
+      <p className="mt-6 text-xs leading-6 text-ink-950/60">
+        {t.caliberNote}
+        <span className="ml-2 font-mono">{t.dataAsOf(series.last)}</span>
+      </p>
 
       {/* 定投 vs 一次性买入对比(真实数据构建期计算): lump-sum 期初一笔投 10 万; DCA 首笔 1 万 + 每月 2000 持续到数据末尾, 两行总投入不同, 收益率列各按自身投入归一 */}
       <section className="mt-12">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-ink-950/40">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-ink-950/60">
           {t.dcaCompare}
         </h2>
-        <p className="mt-1 text-xs text-ink-950/50">{t.dcaCompareIntro}</p>
+        <p className="mt-1 text-xs text-ink-950/60">{t.dcaCompareIntro}</p>
         {(() => {
           // 口径: lump-sum 期初一次投 10 万; DCA = 首笔 1 万 + 每月 2000 至数据末尾(累计投入以 dcaStats.invested 为准, 两栏各自如实展示)
           const TOTAL = 100_000;
@@ -211,7 +249,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
           <div className="mt-4 overflow-hidden rounded-lg border border-ink-950/10">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-ink-950/[0.04] text-left font-mono text-[11px] uppercase tracking-[0.14em] text-ink-950/40">
+                    <tr className="bg-ink-950/[0.04] text-left font-mono text-[11px] uppercase tracking-[0.14em] text-ink-950/60">
                       <th className="px-3 py-3 font-semibold sm:px-4">{t.dcaColMode}</th>
                       <th className="hidden px-3 py-3 text-right sm:px-4 font-semibold sm:table-cell">{t.dcaColInvested}</th>
                       <th className="px-3 py-3 text-right sm:px-4 font-semibold">{t.dcaColFinal}</th>
@@ -227,6 +265,10 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
                           ) : (
                             <span className="text-gain">{r.mode}</span>
                           )}
+                          {/* 窄屏「累计投入」列隐藏, 分母补在方式格内小字, 保住两行口径可比 */}
+                          <span className="mt-0.5 block font-mono text-[10px] text-ink-950/60 sm:hidden">
+                            {moneyC(r.invested)}
+                          </span>
                         </td>
                         <td className="hidden px-3 py-3 text-right sm:px-4 font-mono text-ink-950/60 sm:table-cell">
                           {moneyC(r.invested)}
@@ -269,7 +311,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
 
       {/* 其他热门 */}
       <section className="mt-12">
-        <h2 className="mb-4 text-sm font-bold uppercase tracking-widest text-ink-950/40">
+        <h2 className="mb-4 text-sm font-bold uppercase tracking-widest text-ink-950/60">
           {t.anotherIf}
         </h2>
         <div className="flex flex-wrap gap-2">
@@ -286,7 +328,7 @@ export default async function StockLandingContent({ locale, meta, series }: Prop
         </div>
       </section>
 
-      <footer className="mt-16 border-t border-ink-950/8 pt-6 font-mono text-[11px] text-ink-950/45">
+      <footer className="mt-16 border-t border-ink-950/10 pt-6 font-mono text-[11px] text-ink-950/60">
         {t.footerNote}{' '}
         <a href="https://toolhub.axtrivc.com" className="hover:text-ink-950/60">
           toolhub.axtrivc.com

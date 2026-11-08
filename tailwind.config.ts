@@ -17,6 +17,7 @@ export default {
         gain: '#d42b3a', // 涨/盈利/关键词点缀(暖红, 白底可读)
         profit: '#d42b3a',
         loss: '#0e9f76', // 跌(语义青绿, 白底可读)
+        'loss-strong': '#0b7a5c', // 跌-文本安全档(loss 同色相加深一档, 白底 ≈5.3:1 AA; 小字文本用)
         dca: '#0e9f76', // 定投模式标签(青绿)
       },
       fontFamily: {

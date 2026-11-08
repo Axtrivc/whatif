@@ -5,6 +5,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   computeStats,
   dcaInvested,
@@ -14,6 +17,8 @@ import {
   investedSeries,
   type ReplayInput,
 } from '../lib/engine.ts';
+
+const DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'data');
 
 /** 造一个最小输入 */
 function mk(dates: string[], closes: number[], extra: Partial<ReplayInput> = {}): ReplayInput {
@@ -83,7 +88,9 @@ test('computeStats: finalValue/invested 与 returnPct/multiple 自洽', () => {
   assert.equal(stats.finalValue, 3000);
   assert.ok(Math.abs(stats.returnPct - (1)) < 1e-12); // 3000/1500 - 1 = 1.0
   assert.equal(stats.multiple, 2);
-  assert.ok(Math.abs((1 + stats.cagr) ** stats.years - stats.multiple) < 1e-6);
+  // 定投 cagr 已改资金加权: 现金流 1000@月0 + 500@月1, 终值 3000@月1
+  // ⇒ 1000 + 500/(1+r) = 3000/(1+r) ⇒ 1+r = 2.5, 年化 = 2.5^12 − 1
+  assert.ok(Math.abs((1 + stats.cagr) ** (1 / 12) - 2.5) < 1e-9);
 });
 
 test('DCA 回撤逐日分母: 峰值后腰斩 → 50% 回撤(期末投入口径会误报 25%)', () => {
@@ -177,7 +184,12 @@ test('区间端点(start>0, end<尾): 基准取 closes[start], 窗口外月份�
   assert.equal(stats.returnPct, -0.09375); // 0.90625 - 1 同样精确
   // 回撤逐日分母: 峰 = 4600/1300(46/13), 谷 = 1450/1600(29/32) → 1 - (29·13)/(32·46) = 1095/1472
   assert.ok(Math.abs(stats.maxDrawdown - 1095 / 1472) < 1e-12);
-  assert.ok(Math.abs((1 + stats.cagr) ** stats.years - stats.multiple) < 1e-9);
+  // 定投 cagr 已改资金加权: 月位现金流 1000@0 + 300@2 + 300@3, 终值 1450@3
+  // ⇒ 1000y³ + 300y + 300 = 1450 (y = 1+r) ⇒ 20y³ + 6y − 23 = 0
+  // 引擎月率代回三次方程, 残差应≈0(免硬编码根值); 亏损定投 → 年化为负
+  const y = (1 + stats.cagr) ** (1 / 12);
+  assert.ok(Math.abs(20 * y ** 3 + 6 * y - 23) < 1e-6);
+  assert.ok(stats.cagr < 0);
 });
 
 test('缺价月(整月无交易日): 跳过的 2 月不补投', () => {
@@ -298,4 +310,62 @@ test('跨年注入: monthSeq 年份项保证 12月→1月 单调, 1 月首日照
   const stats = computeStats(input);
   assert.equal(stats.finalValue, 2250);
   assert.ok(Math.abs(stats.returnPct - 2250 / 2000 + 1) < 1e-12);
+});
+
+/* ────────────────────────────────────────────────────────────────
+ * 定投年化口径(批次 11): cagr 改资金加权 IRR, 不再是 (totalRet)^(1/years)−1
+ * (旧几何口径把后期投入视同期初一次投入, 系统性低估真实年化)
+ * ──────────────────────────────────────────────────────────────── */
+
+/** 恒定月增长合成序列: 2020-01 … 2030-01 共 121 个月首(每月一个交易日),
+ *  月度乘子 g = 1.1^(1/12) → 名义年化恰 10% */
+function synth10y(): { dates: string[]; closes: number[] } {
+  const g = 1.1 ** (1 / 12);
+  const dates: string[] = [];
+  const closes: number[] = [];
+  for (let i = 0; i <= 120; i++) {
+    dates.push(`${2020 + Math.floor(i / 12)}${String((i % 12) + 1).padStart(2, '0')}01`);
+    closes.push(100 * g ** i);
+  }
+  return { dates, closes };
+}
+
+test('DCA 年化 = 资金加权 IRR: 恒定月增长合成标的精确还原 10%', () => {
+  // 终值按 m_end(=120, 不 +1)折现时 NPV(g) ≡ 0 精确成立 —
+  // 这正是 IRR 折现月位正确性的直接验证(若按 m_end+1 折现, NPV(g)≠0, 此断言必挂)
+  const { dates, closes } = synth10y();
+  const stats = computeStats(mk(dates, closes, { amount: 1000, monthly: 100 }));
+  assert.ok(Math.abs(stats.cagr - 0.1) < 1e-6, `cagr=${stats.cagr}`);
+});
+
+test('同数据 lump-sum cagr 仍为几何口径 ≈10%(365.2425 与真实闰年日历的固有偏差)', () => {
+  // years = 3653/365.2425 ≈ 10.0016 → 几何年化 ≈ 0.099983, 偏差 ~1.7e-5 属口径内
+  const { dates, closes } = synth10y();
+  const stats = computeStats(mk(dates, closes)); // 无 monthly → 几何口径回归保护
+  assert.ok(Math.abs(stats.cagr - 0.1) < 1e-4, `cagr=${stats.cagr}`);
+});
+
+test('真实数据回归: BTC 2013-01 起定投(首笔 1000 + 每月 100) → IRR 年化 ∈ [0.70, 0.85]', () => {
+  // 审计资金加权实算 ≈77.8%(实测 77.9%); 旧几何口径 56.5% 属系统性低估
+  const raw = JSON.parse(readFileSync(join(DATA_DIR, 'btc.json'), 'utf8')) as {
+    dates: string[];
+    closes: number[];
+  };
+  const start = raw.dates.findIndex((d) => d.startsWith('2013'));
+  assert.ok(start >= 0, 'btc.json 应含 2013 年数据');
+  const stats = computeStats({
+    dates: raw.dates,
+    closes: raw.closes,
+    start,
+    end: raw.dates.length - 1,
+    amount: 1000,
+    monthly: 100,
+  });
+  assert.ok(stats.cagr >= 0.7 && stats.cagr <= 0.85, `cagr=${stats.cagr}`);
+});
+
+test('IRR 不可解时回退几何口径: 单期区间(monthly 真值)dca cagr 仍 = 0', () => {
+  // 注入笔数 <2(仅首笔)且 m_end <1 → monthlyIrr 返 null, 回退 (totalRet)^(1/years)−1
+  const stats = computeStats(mk(['20200615'], [8], { amount: 1000, monthly: 500 }));
+  assert.equal(stats.cagr, 0); // 1^(1/(1/365)) − 1
 });

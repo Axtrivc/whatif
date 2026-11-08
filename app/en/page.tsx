@@ -16,8 +16,9 @@ export const metadata: Metadata = {
     title: 'What If You Had Bought · WhatIf',
     description: 'Pick a stock, a year, an amount. Watch compound interest turn time into a miracle.',
     locale: 'en_US',
+    siteName: 'WhatIf', // 页面级 openGraph 整体替换根 layout 的, 显式带回 og:site_name
     url: '/en/',
-    images: [{ url: '/en/opengraph-image', width: 1200, height: 630, alt: 'What if you had bought Microsoft in 1996?' }],
+    images: [{ url: '/en/opengraph-image', width: 1200, height: 630, alt: 'What if you had bought back then? — WhatIf' }],
   },
   twitter: { card: 'summary_large_image', images: ['/en/opengraph-image'] },
 };

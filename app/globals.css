@@ -31,9 +31,10 @@
   background-size: 22px 22px;
 }
 
-/* ── HUD 小节标签: 等宽 + 全大写 + 宽字距 ── */
+/* ── HUD 小节标签: 等宽 + 全大写 + 宽字距 ──
+      eyebrow 承载小节标题, 透明度不得低于 /60(白底 ≈4.9:1 达 AA) */
 .wi-eyebrow {
-  @apply font-mono text-[10px] font-medium uppercase tracking-[0.22em] text-ink-950/35;
+  @apply font-mono text-[10px] font-medium uppercase tracking-[0.22em] text-ink-950/60;
 }
 
 /* ── 舞台四角 HUD 角括号(对角一对, 指针不拦截; 外层 relative 容器承载,
@@ -212,6 +213,10 @@ input[type='range']:not(.wi-range)::-moz-range-thumb {
   .wi-loading {
     animation: none;
   }
+  /* Tailwind 内置 animate-pulse 同样要关: 清单缺它会漏网 */
+  .animate-pulse {
+    animation: none;
+  }
 }
 
 /* ── 触屏体验: 交互元素禁用双击缩放(快速连点按钮不再触发页面放大) ── */
@@ -238,4 +243,13 @@ input[type='range'] {
     width: 14px;
     height: 22px;
   }
+}
+
+/* ── 键盘可达性补丁: 滑杆 focus 框 ──
+   上面两条 input[type='range'] 规则的 outline:none(特异性 0,2,1)压过文件头部
+   统一 :focus-visible(0,1,0), 键盘聚焦滑杆时无任何指示 — 此处显式补回可见框 */
+input[type='range']:focus-visible,
+input[type='range'].wi-range:focus-visible {
+  outline: 1.5px solid rgba(17, 17, 20, 0.55);
+  outline-offset: 2px;
 }

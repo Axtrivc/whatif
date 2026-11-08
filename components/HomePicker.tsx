@@ -1,20 +1,23 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { dict, TAGLINE_EN, type Dict, type Locale, lp } from '@/lib/i18n';
-import type { StockMeta } from '@/lib/stocks';
+import { dict, MARKET_LABEL_I18N, TAGLINE_EN, type Dict, type Locale, lp } from '@/lib/i18n';
+import type { Market, StockMeta } from '@/lib/stocks';
 import { ccyPrefix } from '@/lib/tokens';
 
 interface Props {
   stocks: StockMeta[];
-  ranges: Record<string, { first: number; last: number }>;
+  ranges: Record<string, { first: number; last: number; years?: number[] }>;
   locale: Locale;
 }
 
 const AMOUNT_PRESETS = [10_000, 100_000, 1_000_000];
 const MONTHLY_PRESETS = [100, 500, 1_000, 5_000];
 const PREF_KEY = 'whatif:prefs';
+
+/** 选择器市场分组渲染顺序: 美股优先, 指数/港股/A股/商品/加密货币殿后(与 STOCKS 声明序无关) */
+const MARKET_ORDER: Market[] = ['nasdaq', 'nyse', 'index', 'hk', 'ashare', 'gold', 'crypto'];
 
 /** 金额解析: 支持 10万 / 1.5亿 / 10w / 50k / 2m / 1b 与裸数字(容忍千分位逗号), 非法输入返回 NaN */
 function parseAmount(raw: string): number {
@@ -32,6 +35,11 @@ function parseAmount(raw: string): number {
 export default function HomePicker({ stocks, ranges, locale }: Props) {
   const t: Dict = dict(locale);
   const router = useRouter();
+  // 无效输入错误提示的关联 id(useId 保证 SSR 水合稳定且全局唯一)
+  const uid = useId();
+  const amountHintId = `${uid}-amount-hint`;
+  const amountErrId = `${uid}-amount-error`;
+  const monthlyErrId = `${uid}-monthly-error`;
   const amountInputRef = useRef<HTMLInputElement>(null);
   const monthlyInputRef = useRef<HTMLInputElement>(null);
   const warmedRef = useRef(new Set<string>());
@@ -46,16 +54,32 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
     () => stocks.filter((s) => ranges[s.key]),
     [stocks, ranges]
   );
+  // 市场分组: 40+ 标的按 MARKET_ORDER 分段渲染, 每组独立标题 + 独立网格
+  const groups = useMemo(
+    () =>
+      MARKET_ORDER.map((market) => ({
+        market,
+        items: available.filter((s) => s.market === market),
+      })).filter((g) => g.items.length > 0),
+    [available]
+  );
   const [key, setKey] = useState(() => available.find((s) => s.key === 'msft')?.key ?? available[0]?.key);
   const stock = available.find((s) => s.key === key);
 
+  // 可选年份: 优先用构建期传入的真实年份 years(数据空洞年已被剔除, 如 TSM 无 2005/2006);
+  // 缺省回退 first..last 连续生成保持兼容。降序排列 → years[0] 仍为最新年(默认态语义不变)
   const years = useMemo(() => {
     if (!stock) return [];
-    const { first, last } = ranges[stock.key];
+    const { first, last, years: ys } = ranges[stock.key];
+    if (ys?.length) return [...ys].sort((a, b) => b - a);
     const list: number[] = [];
     for (let y = last; y >= first; y--) list.push(y);
     return list;
   }, [stock, ranges]);
+
+  /** 把任意输入年份吸附到可选年份列表中最近的一个(空洞年 2005→2004, 2006→2007) */
+  const snapYear = (list: number[], v: number) =>
+    list.length ? list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a)) : v;
 
   const [year, setYear] = useState<number>(() => years.includes(1996) ? 1996 : years[0]);
   const [dca, setDca] = useState(false);
@@ -85,8 +109,10 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
       setKey(p.key);
       warm(p.key);
       if (typeof p.year === 'number' && Number.isFinite(p.year)) {
-        const { first, last } = ranges[p.key];
-        setYear(Math.round(Math.max(first, Math.min(last, p.year))));
+        const { first, last, years: ys } = ranges[p.key];
+        // 先夹到范围, 再吸附到该标的真实存在的年份 — 存过的空洞年(如 TSM 2005)恢复后直接对齐 2004
+        const clamped = Math.round(Math.max(first, Math.min(last, p.year)));
+        setYear(ys?.length ? snapYear(ys, clamped) : clamped);
       }
       if (typeof p.dca === 'boolean') setDca(p.dca);
       if (typeof p.amount === 'number' && p.amount >= 100) {
@@ -120,9 +146,12 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
     userPickedRef.current = true;
     setKey(k);
     warm(k);
-    const { first, last } = ranges[k];
-    // 尽量保持已选年份, 超出范围则夹取
-    setYear((y) => Math.max(first, Math.min(last, y)));
+    const { first, last, years: ys } = ranges[k];
+    // 尽量保持已选年份, 超出范围则夹取; 再吸附到真实年份(从 AAPL 2005 切到 TSM 不会停留在空洞年)
+    setYear((y) => {
+      const clamped = Math.max(first, Math.min(last, y));
+      return ys?.length ? snapYear(ys, clamped) : clamped;
+    });
   };
 
   const play = () => {
@@ -158,7 +187,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
 
   if (!stock) {
     return (
-      <div className="mt-10 rounded-lg border border-ink-950/10 bg-white p-6 text-center text-sm text-ink-950/50">
+      <div className="mt-10 rounded-lg border border-ink-950/10 bg-white p-6 text-center text-sm text-ink-950/60">
         {t.dataMissing} <code className="font-mono text-ink-950/80">npm run fetch-data</code>
       </div>
     );
@@ -168,57 +197,67 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
   const yearP = (year - ranges[key].first) / Math.max(1, ranges[key].last - ranges[key].first);
 
   return (
-    <section className="mt-12 border-y border-ink-950/8 py-8">
+    <section className="mt-12 border-y border-ink-950/10 py-8">
       <div className="wi-eyebrow">{t.pickStock}</div>
-      {/* 移动端: 中文 320px 时 2 列(3 列放不下 5 字中文名), 360px 起 3 列; 英文名更长, 2 列起步且桌面最多 5 列 */}
-      <div
-        className={`mt-3 grid gap-2 ${
-          locale === 'en'
-            ? 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-5'
-            : 'grid-cols-2 min-[360px]:grid-cols-3 sm:grid-cols-7'
-        }`}
-      >
-        {available.map((s) => (
-          <button
-            key={s.key}
-            type="button"
-            onClick={() => pick(s.key)}
-            onMouseEnter={() => warm(s.key)}
-            onFocus={() => warm(s.key)}
-            aria-pressed={s.key === key}
-            className={`rounded-md border px-1.5 py-2.5 text-center transition active:scale-95 sm:px-2 ${
-              s.key === key
-                ? 'border-ink-950 bg-ink-950 font-semibold text-white'
-                : 'border-ink-950/15 bg-white text-ink-950/60 hover:border-ink-950/40 hover:text-ink-950'
-            }`}
-          >
-            {/* 英文名最长 18 字符(Berkshire Hathaway), 用 12px 才能在 5 列网格完整显示 */}
-            <div
-              className={`truncate leading-none ${locale === 'en' ? 'text-xs' : 'text-sm'}`}
-              title={locale === 'zh' ? s.zh : s.en}
-            >
-              {locale === 'zh' ? s.zh : s.en}
-            </div>
-            <div className="mt-1 font-mono text-[9px] uppercase opacity-60">{s.symbol}</div>
-          </button>
-        ))}
-      </div>
-      <p className="mt-2 text-[11px] text-gain/70">
+      {/* 市场分组: 组内 2/3/4/6 列自适应(中英同档) — sm 档 4 列起每 cell ≥118px,
+          5 字中文名(如「超威半导体」)在 640-700px 不再截断; 长英文名 truncate + title 兜底 */}
+      {groups.map((g) => (
+        <div key={g.market} className="mt-5 first:mt-3">
+          <div className="wi-eyebrow">{MARKET_LABEL_I18N[locale][g.market]}</div>
+          <div className="mt-2 grid grid-cols-2 gap-2 min-[360px]:grid-cols-3 sm:grid-cols-4 lg:grid-cols-6">
+            {g.items.map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => pick(s.key)}
+                onMouseEnter={() => warm(s.key)}
+                onFocus={() => warm(s.key)}
+                aria-pressed={s.key === key}
+                className={`rounded-md border px-1.5 py-2.5 text-center transition active:scale-95 sm:px-2 ${
+                  s.key === key
+                    ? 'border-ink-950 bg-ink-950 font-semibold text-white'
+                    : 'border-ink-950/15 bg-white text-ink-950/60 hover:border-ink-950/40 hover:text-ink-950'
+                }`}
+              >
+                {/* 英文名最长 18 字符(Berkshire Hathaway), 用 12px + truncate 兜底 */}
+                <div
+                  className={`truncate leading-none ${locale === 'en' ? 'text-xs' : 'text-sm'}`}
+                  title={locale === 'zh' ? s.zh : s.en}
+                >
+                  {locale === 'zh' ? s.zh : s.en}
+                </div>
+                <div className="mt-1 font-mono text-[9px] uppercase opacity-60">{s.symbol}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <p className="mt-2 text-[11px] text-gain">
         {locale === 'zh' ? stock.tagline : TAGLINE_EN[stock.key] ?? stock.en}
       </p>
       <div className="wi-eyebrow mt-8">{t.pickYear}</div>
       <div className="mt-3 flex items-center gap-3">
-        <input
-          type="range"
-          min={ranges[key].first}
-          max={ranges[key].last}
-          value={year}
-          onChange={(e) => setYear(Number(e.target.value))}
-          className="wi-range flex-1 cursor-pointer"
-          style={{ '--p': yearP } as React.CSSProperties}
-          aria-label={t.yearAria}
-          aria-valuetext={locale === 'zh' ? `${year}年` : String(year)}
-        />
+        {/* 滑杆列: 轨道 + 紧贴其下的首末年份刻度(两端对齐, 跨度一眼可读), 刻度与轨道同宽 */}
+        <div className="min-w-0 flex-1">
+          <input
+            type="range"
+            min={ranges[key].first}
+            max={ranges[key].last}
+            value={year}
+            onChange={(e) => setYear(snapYear(years, Number(e.target.value)))}
+            className="wi-range w-full cursor-pointer"
+            style={{ '--p': yearP } as React.CSSProperties}
+            aria-label={t.yearAria}
+            aria-valuetext={locale === 'zh' ? `${year}年` : String(year)}
+          />
+          <div
+            aria-hidden
+            className="mt-0.5 flex justify-between font-mono text-[9px] leading-3 tabular-nums text-ink-950/60"
+          >
+            <span>{ranges[key].first}</span>
+            <span>{ranges[key].last}</span>
+          </div>
+        </div>
         <span className="w-20 shrink-0 rounded-md border border-ink-950/15 bg-white px-3 py-1 text-center font-mono text-lg font-semibold tabular-nums">
           {year}
         </span>
@@ -226,7 +265,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
 
       <div className="wi-eyebrow mt-8 flex items-center gap-2">
         {t.pickAmount}
-        <span className="rounded border border-ink-950/15 px-1 py-px text-[9px] tracking-widest text-ink-950/45">
+        <span className="rounded border border-ink-950/15 px-1 py-px text-[9px] tracking-widest text-ink-950/60">
           {stock.ccy ?? 'USD'}
         </span>
       </div>
@@ -241,7 +280,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
           onClick={() => setDca(false)}
           aria-pressed={!dca}
           className={`border-r border-ink-950/10 px-4 py-2.5 text-xs font-bold transition sm:py-1.5 ${
-            !dca ? 'bg-ink-950 text-white' : 'text-ink-950/50 hover:text-ink-950/80'
+            !dca ? 'bg-ink-950 text-white' : 'text-ink-950/60 hover:text-ink-950/80'
           }`}
         >
           {t.pickModeLump}
@@ -251,7 +290,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
           onClick={() => setDca(true)}
           aria-pressed={dca}
           className={`px-4 py-2.5 text-xs font-bold transition sm:py-1.5 ${
-            dca ? 'bg-dca/20 text-dca' : 'text-ink-950/50 hover:text-ink-950/80'
+            dca ? 'bg-dca/20 text-dca' : 'text-ink-950/60 hover:text-ink-950/80'
           }`}
         >
           {t.pickModeDca}
@@ -283,16 +322,32 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
           onKeyDown={(e) => e.key === 'Enter' && play()}
           placeholder={t.customAmount}
           aria-label={t.customAmountAria}
-          className="w-40 rounded-md border border-ink-950/10 bg-white py-2 pl-4 pr-3 font-mono text-base text-ink-950 placeholder:text-ink-950/25 focus:border-ink-950/50 focus:outline-none sm:w-36 sm:text-sm"
+          aria-invalid={amountInvalid}
+          aria-describedby={amountInvalid ? `${amountHintId} ${amountErrId}` : amountHintId}
+          className={`w-40 rounded-md border bg-white py-2 pl-4 pr-3 font-mono text-base text-ink-950 placeholder:text-ink-950/25 focus:outline-none sm:w-36 sm:text-sm ${
+            amountInvalid
+              ? 'border-gain focus:border-gain'
+              : 'border-ink-950/10 focus:border-ink-950/50'
+          }`}
         />
       </div>
+      {/* 格式与最低额常驻提示(<100 静默抬到 100 的口径在此告知, 行为不变);
+          无效输入时追加可见错误提示, 与 input 的 aria-describedby 关联 */}
+      <p id={amountHintId} className="mt-1.5 text-[10px] text-ink-950/60">
+        {t.amountFormatHint} · {t.amountMinHint}
+      </p>
+      {amountInvalid && (
+        <p id={amountErrId} role="alert" className="mt-1 text-[11px] font-medium text-gain">
+          {t.amountInvalidHint}
+        </p>
+      )}
 
       {/* 定投模式: 每月追加额 */}
       {dca && (
         <div className="mt-4">
-          <div className="text-[11px] font-semibold text-ink-950/45">
+          <div className="text-[11px] font-semibold text-ink-950/60">
             {t.pickMonthly}{' '}
-            <span className="font-mono text-[10px] text-ink-950/35">({stock.ccy ?? 'USD'})</span>
+            <span className="font-mono text-[10px] text-ink-950/60">({stock.ccy ?? 'USD'})</span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {MONTHLY_PRESETS.map((m) => (
@@ -320,9 +375,20 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
               onKeyDown={(e) => e.key === 'Enter' && play()}
               placeholder={t.customAmount}
               aria-label={t.pickMonthly}
-              className="w-40 rounded-md border border-ink-950/10 bg-white py-1.5 pl-3.5 pr-3 font-mono text-base text-ink-950 placeholder:text-ink-950/25 focus:border-ink-950/50 focus:outline-none sm:w-32 sm:text-xs"
+              aria-invalid={monthlyInvalid}
+              aria-describedby={monthlyInvalid ? monthlyErrId : undefined}
+              className={`w-40 rounded-md border bg-white py-1.5 pl-3.5 pr-3 font-mono text-base text-ink-950 placeholder:text-ink-950/25 focus:outline-none sm:w-32 sm:text-xs ${
+                monthlyInvalid
+                  ? 'border-gain focus:border-gain'
+                  : 'border-ink-950/10 focus:border-ink-950/50'
+              }`}
             />
           </div>
+          {monthlyInvalid && (
+            <p id={monthlyErrId} role="alert" className="mt-1 text-[11px] font-medium text-gain">
+              {t.amountInvalidHint}
+            </p>
+          )}
         </div>
       )}
 
@@ -333,7 +399,7 @@ export default function HomePicker({ stocks, ranges, locale }: Props) {
       >
         {t.startReplay}
       </button>
-      <p className="mt-3 text-[12px] text-ink-950/45">
+      <p className="mt-3 text-[12px] text-ink-950/60">
         {t.replaySummary(year, t.amountLabel(effAmount), ccyPrefix(stock.ccy))}
       </p>
     </section>

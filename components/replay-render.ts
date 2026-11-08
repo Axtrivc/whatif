@@ -6,6 +6,8 @@
  *   全历史折线(从起点到当前时刻逐渐展开, 旧数据保留在左侧) + 淡渐变面积 /
  *   蓝图虚线网格(横=Y 档, 纵=时间刻度) / 前沿准星光标(reticle + 脉冲环) /
  *   跟随资产读数芯片(与日期框同语言) / 盈亏状态色(红↔青绿)无缝渐变 / 右下水印
+ *   盈亏显色随 locale 翻转: zh 红涨绿跌(市场惯例), en 绿涨红跌(英文读者直觉) —
+ *   平滑因子 smooth.f 盈亏语义不动, 显色消费点统一走 showF(见 renderFrame)。
  *
  * 标题/战报/终局卡等 chrome 全部由 DOM 承担(见 ReplayExperience)。
  *
@@ -272,10 +274,15 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   const targetF = value >= putIn ? 1 : 0;
   smooth.f = smooth.f == null ? targetF : smooth.f + (targetF - smooth.f) * damp(0.07);
   const f = smooth.f;
-  const lineColor = mixColor(f);
+  // ── 显色 locale 翻转: en 站绿涨红跌 → 显色因子取反(1-f)。smooth.f 的盈亏语义
+  //    (≥累计投入=1 偏红)与阻尼轨迹不动, 仅显色消费点(mixColor)统一换 showF;
+  //    mixColor 红↔青绿插值起点互换后, en 的盈利段即呈青绿。视频导出走本函数自动生效
+  const showF = locale === 'en' ? 1 - f : f;
+  const lineColor = mixColor(showF);
 
   // ── 布局: 左刻度槽 + 绘图区(右侧留白带, 光点不贴边) + 底部刻度带 ──
-  const gutter = Math.round(Math.min(Math.max(w * 0.075, 46), 64));
+  // 窄画布下限提到 56: en+HKD 的 'HK$1.23M' 刻度 ≈53px, 46px 下限会压过 plotL 竖轴
+  const gutter = Math.round(Math.min(Math.max(w * 0.075, w < 480 ? 56 : 46), 64));
   const plotL = gutter;
   const plotR = w - Math.round(Math.min(Math.max(w * 0.07, 44), 88));
   const plotT = 12;
@@ -423,7 +430,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     ctx.setLineDash([]);
   }
   const area = ctx.createLinearGradient(0, plotT, 0, plotB);
-  area.addColorStop(0, mixColor(f, 0.18));
+  area.addColorStop(0, mixColor(showF, 0.18));
   area.addColorStop(1, 'rgba(255,255,255,0)');
   // 面积: 同一份保留下标 + 前沿点 + 底边两角, 单独 Path2D 一次 fill
   // (描边/面积/对比线共享同一份折叠, 消除原来的三次全长逐点重建)
@@ -452,7 +459,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
 
   // ── 垂直参考虚线(贯穿到底部高亮框) ──
   ctx.setLineDash([3, 4]);
-  ctx.strokeStyle = mixColor(f, 0.45);
+  ctx.strokeStyle = mixColor(showF, 0.45);
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(cx, cy + 12);
@@ -462,8 +469,8 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
 
   // ── 微弱径向衬光(读数焦点提示, 幅度收敛) ──
   const halo = ctx.createRadialGradient(cx, cy, 1, cx, cy, 14);
-  halo.addColorStop(0, mixColor(f, 0.32));
-  halo.addColorStop(1, mixColor(f, 0));
+  halo.addColorStop(0, mixColor(showF, 0.32));
+  halo.addColorStop(1, mixColor(showF, 0));
   ctx.beginPath();
   ctx.arc(cx, cy, 14, 0, Math.PI * 2);
   ctx.fillStyle = halo;
@@ -474,7 +481,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     const pulse = (ts / 1100) % 1;
     ctx.beginPath();
     ctx.arc(cx, cy, 8 + 8 * pulse, 0, Math.PI * 2);
-    ctx.strokeStyle = mixColor(f, 0.5 * (1 - pulse));
+    ctx.strokeStyle = mixColor(showF, 0.5 * (1 - pulse));
     ctx.lineWidth = 1.25;
     ctx.stroke();
   }
@@ -485,7 +492,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
     if (ft >= 0 && ft < 1) {
       ctx.beginPath();
       ctx.arc(cx, cy, 8 + 24 * ft, 0, Math.PI * 2);
-      ctx.strokeStyle = mixColor(f, 0.8 * (1 - ft));
+      ctx.strokeStyle = mixColor(showF, 0.8 * (1 - ft));
       ctx.lineWidth = 2 - 1.2 * ft;
       ctx.stroke();
     }
@@ -547,7 +554,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   rr(chx, chy, chW, chH, 4);
   ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.fill();
-  ctx.strokeStyle = mixColor(f, 0.55);
+  ctx.strokeStyle = mixColor(showF, 0.55);
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.fillStyle = lineColor;
@@ -565,7 +572,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, o: ChartOpts): void {
   rr(ccx - cw / 2, ccy - chh / 2, cw, chh, 4);
   ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.fill();
-  ctx.strokeStyle = mixColor(f, 0.75);
+  ctx.strokeStyle = mixColor(showF, 0.75);
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.textAlign = 'center';

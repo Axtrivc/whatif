@@ -22,7 +22,7 @@ export interface ReplayStats {
   returnPct: number;
   multiple: number;
   years: number;
-  cagr: number; // 年化(几何)
+  cagr: number; // 年化: lump-sum=几何口径; dca=资金加权 IRR(不可解时回退几何)
   maxDrawdown: number; // 0~1
   startDate: string;
   endDate: string;
@@ -102,6 +102,57 @@ export function dcaInvested(input: ReplayInput): number {
   return investedSeries(input)[input.end - input.start];
 }
 
+/** ── 定投月度资金加权内部收益率(IRR) ──
+ *  现金流: 注入笔 k(k=0 为首笔 amount, k≥1 为每月 monthly)发生在注入月
+ *  m_k(0-based, m_0=0, 注入月判定与 investedSeries 同规则 — 每月首个交易日);
+ *  终值 finalValue 折现在 m_end = monthSeq(dates[end]) − monthSeq(dates[start])
+ *  (不 +1: dates[end] 属最后一个注入月, 终值与末笔注入同月位实现 — 恒定月增长 g 下
+ *  取该月位时 NPV(g)≡0, 是折现月位正确性的直接判据)。
+ *  令 f(r) = finalValue/(1+r)^{m_end} − Σ_k amount_k/(1+r)^{m_k}(投资人视角 NPV,
+ *  与施工说明的 NPV 定义相差整体符号): 现金流时序符号 (−,…,−,+) 恰一次变号
+ *  (Descartes), f 在 r∈(−1,∞) 单次由正穿负 — 二分可解唯一根。
+ *  lo=−0.99, hi 自 1 倍增至 f(hi)<0(上限 1e6), 80 次迭代; 年化 = (1+r)^12 − 1。
+ *  注入笔数 <2 / m_end < 1 / 区间端点未变号(根在 [−0.99, 1e6] 外)→ null,
+ *  调用方回退几何口径。 */
+function monthlyIrr(input: ReplayInput): number | null {
+  const { dates, start, end, amount, monthly } = input;
+  if (!monthly) return null;
+  // 注入现金流 [月位, 金额]: 首笔 amount 在月 0, 此后每个新月首个交易日注 monthly
+  const flows: Array<[number, number]> = [[0, amount]];
+  const base = monthSeq(dates[start]);
+  let lastM = base;
+  for (let j = 1; j <= end - start; j++) {
+    const m = monthSeq(dates[start + j]);
+    if (m > lastM) {
+      lastM = m;
+      flows.push([m - base, monthly]);
+    }
+  }
+  const mEnd = lastM - base; // 末次月份即 dates[end] 所在月
+  if (flows.length < 2 || mEnd < 1) return null;
+  const finalValue = dcaSeries(input)[end - start]; // WeakMap 缓存, 与 computeStats 同源
+  // f(r) > 0 ⟺ 折现率 r 低估了这串现金流(IRR 在 r 右侧)
+  const f = (r: number): number => {
+    let v = finalValue / Math.pow(1 + r, mEnd);
+    for (const [m, amt] of flows) v -= amt / Math.pow(1 + r, m);
+    return v;
+  };
+  let lo = -0.99;
+  if (f(lo) <= 0) return null; // 根 < −0.99(如终值归零) — 不强行求解
+  let hi = 1;
+  while (f(hi) >= 0) {
+    hi *= 2;
+    if (hi > 1e6) return null; // 月 IRR 超 1e6 量级视为不收敛
+  }
+  for (let i = 0; i < 80; i++) {
+    const mid = (lo + hi) / 2;
+    if (f(mid) >= 0) lo = mid;
+    else hi = mid;
+  }
+  const r = (lo + hi) / 2;
+  return Math.pow(1 + r, 12) - 1;
+}
+
 /** 全程统计(回放结束时展示) */
 export function computeStats(input: ReplayInput): ReplayStats {
   const { dates, start, end } = input;
@@ -132,7 +183,12 @@ export function computeStats(input: ReplayInput): ReplayStats {
     returnPct: totalRet - 1,
     multiple: totalRet,
     years,
-    cagr: Math.pow(totalRet, 1 / years) - 1,
+    // 定投年化: 资金加权 IRR(把后期投入按实际停留时长折现, 修正"期末累计投入
+    // 当期初一次投入"的系统性低估); IRR 不可解时回退几何口径。lump-sum 分母即
+    // 期初单笔, 几何口径本就正确, 不动。
+    cagr: input.monthly
+      ? monthlyIrr(input) ?? Math.pow(totalRet, 1 / years) - 1
+      : Math.pow(totalRet, 1 / years) - 1,
     maxDrawdown: maxDD,
     startDate: dates[start],
     endDate: dates[end],

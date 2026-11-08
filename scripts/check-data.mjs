@@ -42,13 +42,14 @@ function warnDiag(msg) {
 function stockKeys() {
   const src = readFileSync(join(ROOT, 'lib', 'stocks.ts'), 'utf8');
   const out = [];
-  // 字符类 [a-z0-9-]: 兼容未来 brk-b/csi300 类 key; 下述交叉核对兜底任何正则未覆盖的形态
-  const re = /key:\s*'([a-z0-9-]+)'/g;
+  // 字符类 [a-z0-9-]: 兼容未来 brk-b/csi300 类 key; 引号组 ['"] 把双引号风格纳入
+  // (双引号 key 曾静默逃过下面的计数核对); 交叉核对兜底任何正则未覆盖的形态
+  const re = /key:\s*['"]([a-z0-9-]+)['"]/g;
   let m;
   while ((m = re.exec(src)) !== null) out.push(m[1]);
-  // 交叉核对(去重前计数): 任何 `key: '...'` 出现却未被上面正则匹配(如大写/下划线/新引号风格)
-  // → 清单静默缩水, 检查形同虚设, 直接硬失败
-  const total = (src.match(/\bkey:\s*'/g) || []).length;
+  // 交叉核对(去重前计数): 任何 `key: '...'` / `key: "..."` 出现却未被上面正则匹配
+  // (如大写/下划线) → 清单静默缩水, 检查形同虚设, 直接硬失败
+  const total = (src.match(/\bkey:\s*['"]/g) || []).length;
   if (total !== out.length) {
     console.error(`✘ lib/stocks.ts 解析异常: key 出现 ${total} 次但仅匹配 ${out.length} 个`);
     process.exit(1);
@@ -57,7 +58,9 @@ function stockKeys() {
 }
 
 let failures = 0;
-for (const key of stockKeys()) {
+let maxLast = ''; // 各数据文件 last(YYYYMMDD)的最大值 — ticker.asOf 核对口径
+const KEYS = stockKeys();
+for (const key of KEYS) {
   const file = join(ROOT, 'public', 'data', `${key}.json`);
   if (!existsSync(file)) {
     console.error(`✘ ${key}: 缺文件 public/data/${key}.json`);
@@ -122,6 +125,7 @@ for (const key of stockKeys()) {
   // ── 陈旧诊断(默认仅告警, CHECK_DATA_STRICT=1 时计失败) + 缺口硬门禁(带 KNOWN_GAPS 豁免) ──
   // 新鲜度: last(YYYYMMDD) 距今 >10 自然日 → 数据陈旧
   if (typeof j.last === 'string' && /^\d{8}$/.test(j.last)) {
+    if (j.last > maxLast) maxLast = j.last;
     const ageDays = Math.floor((Date.now() - ymdToUtc(j.last)) / 86_400_000);
     if (ageDays > 10) warnDiag(`${key}: 数据陈旧 (last=${j.last}, 距今 ${ageDays} 天)，建议 npm run fetch-data`);
   }
@@ -146,13 +150,85 @@ for (const key of stockKeys()) {
   }
 }
 
-// ticker.json 存在性(走马灯依赖; 缺失不致命, 仅告警)
-if (!existsSync(join(ROOT, 'public', 'data', 'ticker.json'))) {
-  console.warn('⚠ ticker.json 缺失, 首页走马灯将为空');
+// ticker.json(走马灯数据源; 缺失不致命, 仅告警)。存在时校验 { asOf, items } 结构,
+// 且 asOf = 各数据文件 last 最大值 — 数据文件更新后未重生成 ticker 时在此拦截
+{
+  const tickerFile = join(ROOT, 'public', 'data', 'ticker.json');
+  if (!existsSync(tickerFile)) {
+    console.warn('⚠ ticker.json 缺失, 首页走马灯将为空');
+  } else {
+    let tj = null;
+    try {
+      tj = JSON.parse(readFileSync(tickerFile, 'utf8'));
+    } catch (e) {
+      console.error(`✘ ticker.json JSON 解析失败 — ${e.message}`);
+      failures++;
+    }
+    if (tj !== null) {
+      if (typeof tj.asOf !== 'string' || !/^\d{8}$/.test(tj.asOf) || !Array.isArray(tj.items)) {
+        console.error('✘ ticker.json 应为 { asOf: YYYYMMDD, items: [] } 结构(fetch-data 生成端口径)');
+        failures++;
+      } else if (maxLast && tj.asOf !== maxLast) {
+        console.error(`✘ ticker.json asOf(${tj.asOf}) ≠ 各数据文件 last 最大值(${maxLast}) — 数据更新后未重生成 ticker`);
+        failures++;
+      }
+    }
+  }
+}
+
+// ── 首页预设门禁(硬门禁, 与缺口门禁同级): PRESETS 每条都必须能渲染出卡片 ──
+// HomeContent 对渲染不可达的预设是 continue 静默跳过(曾致 TSM 卡因数据缺 2005 消失);
+// 此处按同一渲染条件前置校验, 新预设再静默消失时构建即红:
+//   1) key 在 lib/stocks.ts STOCKS 内(meta 失配 → 跳过)
+//   2) public/data/{key}.json 存在且 dates 非空(缺数据 → 跳过)
+//   3) 数据首年 ≤ year(首年晚于预设年 → 被 first > year 保护跳过)
+//   4) dates 中存在 ≥ year 的日期, 即末年 ≥ year(startIndexForYear 夹取语义;
+//      末年也早于预设年 → 无从夹取, 跳过)
+{
+  const src = readFileSync(join(ROOT, 'components', 'HomeContent.tsx'), 'utf8');
+  const re = /\{\s*key:\s*'([a-z0-9-]+)',\s*year:\s*(\d+)/g;
+  const presets = [];
+  let m;
+  while ((m = re.exec(src)) !== null) presets.push({ key: m[1], year: Number(m[2]) });
+  // 正则一条都没命中 = PRESETS 源码形态变了(改格式/换引号), 门禁将形同虚设 → 硬失败
+  if (!presets.length) {
+    console.error('✘ 预设门禁: components/HomeContent.tsx 未解析到任何 PRESETS 条目(正则失配), 门禁失效');
+    failures++;
+  }
+  const known = new Set(KEYS);
+  for (const p of presets) {
+    if (!known.has(p.key)) {
+      console.error(`✘ 预设 ${p.key}@${p.year}: key 不在 lib/stocks.ts STOCKS 内 — 该预设卡将被静默跳过`);
+      failures++;
+      continue;
+    }
+    const file = join(ROOT, 'public', 'data', `${p.key}.json`);
+    let dates = null;
+    if (existsSync(file)) {
+      try {
+        dates = JSON.parse(readFileSync(file, 'utf8')).dates;
+      } catch (e) {
+        console.error(`✘ 预设 ${p.key}@${p.year}: ${p.key}.json JSON 解析失败 — ${e.message}`);
+        failures++;
+      }
+    } else {
+      console.error(`✘ 预设 ${p.key}@${p.year}: 缺文件 public/data/${p.key}.json — 该预设卡将被静默跳过`);
+      failures++;
+    }
+    if (!Array.isArray(dates) || !dates.length) continue; // 缺文件/解析失败已计失败
+    const firstYear = Number(String(dates[0]).slice(0, 4));
+    const lastYear = Number(String(dates[dates.length - 1]).slice(0, 4));
+    if (!(firstYear <= p.year) || !(lastYear >= p.year)) {
+      console.error(
+        `✘ 预设 ${p.key}@${p.year}: 数据年份 ${firstYear}-${lastYear} 覆盖不到该年(夹取不可达) — 该预设卡将被静默跳过`
+      );
+      failures++;
+    }
+  }
 }
 
 if (failures) {
   console.error(`\n数据检查失败: ${failures} 个问题。先运行 npm run fetch-data`);
   process.exit(1);
 }
-console.log(`✔ 数据检查通过 (${stockKeys().length} 个标的)`);
+console.log(`✔ 数据检查通过 (${KEYS.length} 个标的)`);

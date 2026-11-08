@@ -5,7 +5,7 @@
 import { computeStats, dcaSeries, type ReplayInput, type ReplayStats } from '@/lib/engine';
 import { dateISO, fmtPrice, moneyEn, moneyZh, multiple, pct } from '@/lib/format';
 import type { Locale } from '@/lib/i18n';
-import { GAIN, LOSS } from '@/lib/tokens';
+import { hexToRgb, toneFor } from '@/lib/tokens';
 import { SITE_HOST } from '@/lib/site';
 import type { StockMeta } from '@/lib/stocks';
 
@@ -64,7 +64,9 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
   const stats = opts.stats ?? computeStats(input);
   const year = input.dates[input.start].slice(0, 4);
   const up = stats.returnPct >= 0;
-  const accent = up ? GAIN : LOSS;
+  // 涨跌语义色随 locale 翻转(标准档, 与 canvas/DOM 大字同源): en 绿涨红跌, zh 红涨绿跌
+  const { up: upC, down: downC } = toneFor(locale);
+  const accent = up ? upC : downC;
 
   const cv = document.createElement('canvas');
   cv.width = W;
@@ -189,10 +191,11 @@ export async function buildShareImage(opts: ShareOpts): Promise<Blob> {
     }
     ctx.lineTo(xOf(nPts), yOf(vs[nPts]));
   };
-  // 淡渐变面积(与回放图表同语言)
+  // 淡渐变面积(与回放图表同语言): 底色由 accent 同源派生, locale 翻转自动跟随
   drawPath();
   const area = ctx.createLinearGradient(0, cTop, 0, cBottom);
-  area.addColorStop(0, up ? 'rgba(212,43,58,0.13)' : 'rgba(14,159,118,0.13)');
+  const [ar, ag, ab] = hexToRgb(accent);
+  area.addColorStop(0, `rgba(${ar},${ag},${ab},0.13)`);
   area.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.lineTo(xOf(nPts), cBottom);
   ctx.lineTo(P, cBottom);

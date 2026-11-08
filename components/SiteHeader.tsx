@@ -37,7 +37,7 @@ export default function SiteHeader({ locale, ctaHref, ctaLabel }: Props) {
           >
             {t.siteName}
           </span>
-          <span className="block font-mono text-[10px] uppercase tracking-[0.2em] text-ink-950/40">
+          <span className="block font-mono text-[10px] uppercase tracking-[0.2em] text-ink-950/60">
             {t.brandSub}
           </span>
         </span>
